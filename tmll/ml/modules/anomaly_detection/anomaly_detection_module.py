@@ -145,7 +145,9 @@ class AnomalyDetection(BaseModule):
         fig_dpi = kwargs.get("fig_dpi", 500)
         colors = plt.colormaps.get_cmap("tab10")
 
-        for idx, (name, dataframe) in enumerate(self.dataframes.items()):
+        for idx, (id, dataframe) in enumerate(self.dataframes.items()):
+            output = self.experiment.get_output_by_id(id)
+            name = output.name if output else id
             plots = []
             # Plot the original data
             plots.append({
@@ -158,8 +160,7 @@ class AnomalyDetection(BaseModule):
             })
 
             # Append the anomaly periods to the plots as span plot
-            for start, end in anomaly_detection_results.anomaly_periods[name]:
-                # print(f"Anomaly detected from {start} to {end}")
+            for start, end in anomaly_detection_results.anomaly_periods[id]:
                 plots.append({
                     "label": "Anomaly Period",
                     "plot_type": "span",
@@ -172,13 +173,13 @@ class AnomalyDetection(BaseModule):
                 })
 
             anomaly_points_list = []
-            for point in anomaly_detection_results.anomalies[name].index:
-                if not anomaly_detection_results.anomalies[name].loc[point].any():
+            for point in anomaly_detection_results.anomalies[id].index:
+                if not anomaly_detection_results.anomalies[id].loc[point].any():
                     continue
 
                 # Check if the point is within any anomaly period
                 in_anomaly_period = False
-                for start, end in anomaly_detection_results.anomaly_periods[name]:
+                for start, end in anomaly_detection_results.anomaly_periods[id]:
                     if start <= point <= end:
                         in_anomaly_period = True
                         break

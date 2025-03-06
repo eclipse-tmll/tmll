@@ -145,14 +145,14 @@ class BaseModule(ABC):
 
         # Process each output
         for output_key, output_data in data.items():
-            shortened = output_key.split("$")[0]
-            converted = next(iter(output for output in outputs if output.id == shortened), None) if outputs else None
-            shortened = converted.name if converted else shortened
+            output = next(iter(output for output in outputs if output.id == output_key.split("$")[0]), None) if outputs else None
+            if output is None:
+                continue
 
-            if shortened not in self.dataframes:
+            if output.id not in self.dataframes:
                 df = output_data
 
-                if converted and converted.type == "TIME_GRAPH":
+                if output.type == "TIME_GRAPH":
                     df = df.rename({"start_time": "timestamp"}, axis=1)
                     df["end_time"] = pd.to_datetime(df["end_time"])
 
@@ -166,7 +166,7 @@ class BaseModule(ABC):
                 if kwargs.get("remove_minimum", False):
                     df = self.data_preprocessor.remove_minimum(df)
 
-                self.dataframes[shortened] = df
+                self.dataframes[output.id] = df
 
         # Filter out dataframes with less than min_size instances
         min_size = kwargs.get("min_size", 1)

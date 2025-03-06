@@ -266,7 +266,15 @@ class ChangePointAnalysis(BaseModule):
         self.window_size = window_size
 
         results = ChangePointAnalysisResult(metrics={})
-        metrics_to_analyze = metrics if metrics else list(self.dataframes.keys())
+
+        if metrics:
+            outputs = [self.experiment.get_output_by_name(metric) for metric in metrics]
+            metrics_to_analyze = [output.id for output in outputs if output is not None]
+            if not metrics_to_analyze:
+                self.logger.warning(f"None of the requested metrics were found: {metrics}")
+                return None
+        else:
+            metrics_to_analyze = list(self.dataframes.keys())
 
         if not methods:
             methods = self.AVAILABLE_METRICS
@@ -474,48 +482,33 @@ class ChangePointAnalysis(BaseModule):
 
         fig_size = kwargs.get("fig_size", (15, 3))
         fig_dpi = kwargs.get("fig_dpi", 100)
-
-        combined_plots = []
         colors = plt.get_cmap("tab10")
-        for idx, metric in enumerate(self.combined_df.columns):
-            # Add time series plot for each metric (combined)
-            combined_plots.append({
-                "plot_type": "time_series",
-                "data": pd.DataFrame({metric: self.combined_df[metric]}, index=self.combined_df.index),
-                "label": metric,
-                "title": metric,
-                "y": metric,
-                "color": colors(idx % 10),
-                "linewidth": 1.5,
-                "xlabel": "Time",
-                "ylabel": metric
-            })
-        self._plot(plots=combined_plots, plot_size=fig_size, dpi=fig_dpi,
-                   fig_title="Time Series of Metrics",
-                   fig_xlabel="Time",
-                   fig_ylabel="Value (normalized)")
 
-        def _get_metric_data(metric_name: str) -> Tuple[str, Optional[pd.Series]]:
-            match metric_name:
+        def _get_metric_data(metric: str) -> Tuple[str, Optional[pd.Series]]:
+            match metric:
                 case "zscore":
                     return "Combined z-score Analysis", \
-                        results.metrics[metric_name].kwargs.get("combined_score") if (
+                        results.metrics[metric].kwargs.get("combined_score") if (
                             "zscore" in results.metrics and results.metrics["zscore"].kwargs is not None) else None
                 case "voting":
                     return "Voting-based Analysis", \
-                        results.metrics[metric_name].kwargs.get("vote_matrix", None) if (
+                        results.metrics[metric].kwargs.get("vote_matrix", None) if (
                             "voting" in results.metrics and results.metrics["voting"].kwargs is not None) else None
                 case "pca":
                     return "PCA Analysis", \
-                        results.metrics[metric_name].kwargs.get("principal_component", None) if (
+                        results.metrics[metric].kwargs.get("principal_component", None) if (
                             "pca" in results.metrics and results.metrics["pca"].kwargs is not None) else None
                 case _:
-                    return f"Change Points for {metric_name}", \
-                        self.dataframes[metric_name].iloc[:, 0] if metric_name in self.dataframes else None
+                    return f"Change Points for {metric}", \
+                        self.dataframes[metric].iloc[:, 0] if metric in self.dataframes else None
 
-        for idx, (metric_name, metric_result) in enumerate(results.metrics.items()):
+        for idx, (metric, result) in enumerate(results.metrics.items()):
             plots = []
-            title, series = _get_metric_data(metric_name)
+            title, series = _get_metric_data(metric)
+            output = self.experiment.get_output_by_id(metric)
+            metric_name = output.name if output else metric
+            title = title.replace(metric, metric_name)
+
             # Add individual metric plots
             plots.append({
                 "plot_type": "time_series",
@@ -528,7 +521,7 @@ class ChangePointAnalysis(BaseModule):
             })
 
             # Add change points to the plot
-            for cp, mag in zip(metric_result.change_points, metric_result.magnitudes):
+            for cp, mag in zip(result.change_points, result.magnitudes):
                 change_time = self.combined_df.index[cp]
 
                 # Normalize magnitude based on the metric
