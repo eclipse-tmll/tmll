@@ -132,3 +132,19 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## License
 
 This project is licensed under the MIT - see the [LICENSE](LICENSE) file for details.
+
+## Cite TMLL
+
+If you are using TMLL in your research, please cite the following paper:
+
+Kaveh Shahedi, Matthew Khouzam, Heng Li, Maxime Lamothe, Foutse Khomh, "[From Technical Excellence to Practical Adoption: Lessons Learned Building an ML-Enhanced Trace Analysis Tool](https://ieeexplore.ieee.org/abstract/document/11334725)," *40th International Conference on Automated Software Engineering (ASE)*, Seoul, South Korea, November 16 - 20, 2025.
+```bibtex
+@inproceedings{shahedi2025technical,
+  title={From Technical Excellence to Practical Adoption: Lessons Learned Building an ML-Enhanced Trace Analysis Tool},
+  author={Shahedi, Kaveh and Khouzam, Matthew and Li, Heng and Lamothe, Maxime and Khomh, Foutse},
+  booktitle={2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE)},
+  pages={3462--3474},
+  year={2025},
+  organization={IEEE}
+}
+```
