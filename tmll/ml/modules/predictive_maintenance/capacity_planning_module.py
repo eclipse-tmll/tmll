@@ -438,13 +438,10 @@ class CapacityPlanning(BaseModule):
         for resource_type, columns in resource_columns_by_type.items():
             if resource_type == ResourceType.CPU:
                 threshold = self.thresholds.cpu_threshold
-                units = "%"
             elif resource_type == ResourceType.MEMORY:
                 threshold = self.thresholds.memory_threshold
-                units = "bytes"
             else:
                 threshold = self.thresholds.disk_threshold
-                units = "bytes/s"
 
             type_metrics = {}
             forecast_timestamps = []
@@ -452,8 +449,7 @@ class CapacityPlanning(BaseModule):
                 original_series = self.combined_df[f"{name}_original"]
                 forecast_values, forecast_timestamps = resource_metrics[name]
 
-                forecast_values = self.scalers[name].inverse_transform(np.array(forecast_values)
-                                                                       .reshape(-1, 1)).flatten().tolist()
+                forecast_values = self.scalers[name].inverse_transform(np.array(forecast_values).reshape(-1, 1)).flatten().tolist()  # type: ignore
 
                 violations = self._detect_threshold_violations(
                     forecast_values,
@@ -513,7 +509,7 @@ class CapacityPlanning(BaseModule):
             DocumentGenerator.metrics_group("Analysis Parameters", parameters)
 
             # Resource metrics
-            for resource_name, metrics in result.resource_metrics.items():
+            for resource_id, metrics in result.resource_metrics.items():
                 resource_metrics = {
                     "Current Usage": self._get_formatted_resource_property(metrics.current_usage, resource_type),
                     "Peak Usage": self._get_formatted_resource_property(metrics.peak_usage, resource_type),
@@ -533,6 +529,8 @@ class CapacityPlanning(BaseModule):
                     )
                     resource_metrics["Total Violations"] = str(len(metrics.threshold_violations))
 
+                output = self.experiment.get_output_by_id(resource_id)
+                resource_name = output.name if output else resource_id
                 DocumentGenerator.metrics_group(f"Resource: {resource_name}", resource_metrics)
 
                 if metrics.threshold_violations:
@@ -572,11 +570,14 @@ class CapacityPlanning(BaseModule):
         }
 
         for resource_type, result in forecast_results.items():
-            for resource_name, metrics in result.resource_metrics.items():
+            for resource_id, metrics in result.resource_metrics.items():
                 average_usage = metrics.average_usage
                 peak_usage = metrics.peak_usage
                 pattern = metrics.utilization_pattern
                 violations = metrics.threshold_violations
+
+                output = self.experiment.get_output_by_id(resource_id)
+                resource_name = output.name if output else resource_id
 
                 threshold = (
                     result.thresholds_used.cpu_threshold if resource_type.name == ResourceType.CPU.name
@@ -685,8 +686,8 @@ class CapacityPlanning(BaseModule):
         colors = plt.get_cmap("tab10")
 
         for idx, (resource_type, result) in enumerate(forecast_results.items()):
-            for resource_name, metrics in result.resource_metrics.items():
-                historical_data = self.combined_df[f"{resource_name}_original"]
+            for resource_id, metrics in result.resource_metrics.items():
+                historical_data = self.combined_df[f"{resource_id}_original"]
 
                 # Get the last 10% of the data for zoomed view
                 if zoomed:
@@ -695,7 +696,7 @@ class CapacityPlanning(BaseModule):
                 forecast_data = pd.Series(
                     metrics.forecast_values,
                     index=metrics.forecast_timestamps,
-                    name=resource_name
+                    name=resource_id
                 )
 
                 plots = []
@@ -771,6 +772,8 @@ class CapacityPlanning(BaseModule):
                 usage_str = self._get_formatted_resource_property(metrics.average_usage, resource_type)
                 peak_str = self._get_formatted_resource_property(metrics.peak_usage, resource_type)
 
+                output = self.experiment.get_output_by_id(resource_id)
+                resource_name = output.name if output else resource_id
                 title = (
                     f"{resource_type.name} Capacity Forecast: {resource_name}\n"
                     f"(Average Usage: {usage_str}, "
