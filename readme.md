@@ -12,6 +12,8 @@ TMLL provides users with pre-built, automated solutions integrating general Trac
 ## Table of Contents
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [MCP Server](#mcp-server)
+- [CLI Usage](#cli-usage)
 - [Features and Modules](#features-and-modules)
 - [Prerequisites](#prerequisites)
 - [Documentation](#documentation)
@@ -98,6 +100,88 @@ ad = AnomalyDetection(client, experiment, outputs)
 anomalies = ad.find_anomalies(method='iforest')
 ad.plot_anomalies(anomalies)
 ```
+
+## MCP Server
+
+TMLL provides an MCP (Model Context Protocol) server that exposes trace analysis capabilities to AI assistants and other MCP clients.
+
+### Setup
+
+1. Install TMLL (see [Installation](#installation))
+
+2. Start your Trace Server:
+```bash
+./tracecompass-server -vmargs -Dtraceserver.port=8080
+```
+
+3. Configure in your MCP client (e.g., `~/.config/kiro-cli/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "tmll": {
+      "command": "python3",
+      "args": ["/path/to/tmll/mcp_server.py"]
+    }
+  }
+}
+```
+
+### Available Tools
+
+- `create_experiment`: Create trace experiments from files
+- `list_outputs`: List available outputs for an experiment
+- `fetch_data`: Fetch data from experiment outputs
+- `detect_anomalies`: Run anomaly detection analysis
+- `detect_memory_leak`: Detect memory leaks
+- `detect_changepoints`: Detect performance trend changes
+- `analyze_correlation`: Perform root cause correlation analysis
+- `detect_idle_resources`: Identify underutilized resources
+- `plan_capacity`: Run capacity planning predictions
+- `cluster_data`: Perform clustering analysis
+
+## CLI Usage
+
+TMLL includes a command-line interface for running analyses without writing code.
+
+### Basic Commands
+
+```bash
+# Create an experiment
+tmll_cli.py create --traces /path/to/trace1 /path/to/trace2 --name "My Experiment"
+
+# List outputs for an experiment
+tmll_cli.py list-outputs --experiment <UUID>
+
+# Fetch data from outputs
+tmll_cli.py fetch-data --experiment <UUID> --keywords "cpu usage"
+
+# Run anomaly detection
+tmll_cli.py detect-anomalies --experiment <UUID> --keywords "cpu usage" --method iforest
+
+# Detect memory leaks
+tmll_cli.py detect-memory-leak --experiment <UUID>
+
+# Detect change points
+tmll_cli.py detect-changepoints --experiment <UUID> --method pelt
+
+# Analyze correlations
+tmll_cli.py analyze-correlation --experiment <UUID> --method pearson
+
+# Detect idle resources
+tmll_cli.py detect-idle --experiment <UUID> --threshold 5
+
+# Run capacity planning
+tmll_cli.py plan-capacity --experiment <UUID> --horizon 30
+
+# Perform clustering
+tmll_cli.py cluster --experiment <UUID> --method kmeans --n-clusters 3
+```
+
+### Options
+
+- `--host`: Trace Server host (default: localhost)
+- `--port`: Trace Server port (default: 8080)
+- `--verbose`: Enable verbose output
 
 ## Prerequisites
 
