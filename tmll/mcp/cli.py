@@ -3,6 +3,7 @@
 import argparse
 import sys
 import json
+import pandas as pd
 from tmll.tmll_client import TMLLClient
 from tmll.common.models.experiment import Experiment
 from tmll.ml.modules.anomaly_detection.anomaly_detection_module import AnomalyDetection
@@ -11,7 +12,6 @@ from tmll.ml.modules.performance_trend.change_point_module import ChangePointAna
 from tmll.ml.modules.root_cause.correlation_module import CorrelationAnalysis
 from tmll.ml.modules.resource_optimization.idle_resource_detection_module import IdleResourceDetection
 from tmll.ml.modules.predictive_maintenance.capacity_planning_module import CapacityPlanning
-from tmll.ml.unsupervised.clustering import Clustering
 
 
 def get_experiment(client, exp_uuid):
@@ -30,7 +30,10 @@ def create_experiment(args):
     client = TMLLClient(args.host, args.port, verbose=args.verbose)
     traces = [{"path": os.path.expanduser(path)} for path in args.traces]
     experiment = client.create_experiment(traces=traces, experiment_name=args.name)
-    print(f"Created experiment: {experiment.name} (UUID: {experiment.UUID})")
+    if not experiment:
+        print("Failed to create experiment")
+        return
+    print(f"Created experiment: {experiment.name} (UUID: {experiment.uuid})")
 
 
 def list_outputs(args):
@@ -65,11 +68,22 @@ def fetch_data_cmd(args):
     data = client.fetch_data(experiment, outputs_with_tree)
     
     if args.output:
-        for key, df in data.items():
-            df.to_csv(f"{args.output}_{key}.csv", index=False)
+        for key, value in data.items():
+            if isinstance(value, pd.DataFrame):
+                value.to_csv(f"{args.output}_{key}.csv", index=False)
+            elif isinstance(value, dict):
+                for sub_key, df in value.items():
+                    if isinstance(df, pd.DataFrame):
+                        df.to_csv(f"{args.output}_{key}_{sub_key}.csv", index=False)
         print(f"Data exported to {args.output}_*.csv")
     else:
-        print(json.dumps({k: v.to_dict() for k, v in data.items()}, indent=2))
+        result = {}
+        for k, v in data.items():
+            if isinstance(v, pd.DataFrame):
+                result[k] = v.to_dict()
+            elif isinstance(v, dict):
+                result[k] = {sk: sv.to_dict() for sk, sv in v.items() if isinstance(sv, pd.DataFrame)}
+        print(json.dumps(result, indent=2, default=str))
 
 
 def detect_anomalies(args):
@@ -106,15 +120,9 @@ def detect_memory_leak(args):
         print("Experiment not found")
         return
     
-    outputs = experiment.find_outputs(keyword=args.keywords, type=['xy'])
-    
-    if not outputs:
-        print("No outputs found")
-        return
-    
-    mld = MemoryLeakDetection(client, experiment, outputs)
-    result = mld.detect_memory_leak()
-    print(f"Memory leak detected: {result}")
+    mld = MemoryLeakDetection(client, experiment)
+    result = mld.analyze_memory_leaks()
+    print(f"Memory leak analysis: {result}")
 
 
 def detect_changepoints(args):
@@ -133,12 +141,12 @@ def detect_changepoints(args):
         return
     
     cpa = ChangePointAnalysis(client, experiment, outputs)
-    changepoints = cpa.get_change_points(method=args.method)
+    changepoints = cpa.get_change_points(methods=args.methods)
     
     if args.plot:
         cpa.plot_change_points(changepoints)
     else:
-        print(f"Found {len(changepoints)} change points")
+        print(f"Found {len(changepoints.metrics) if changepoints else 0} change point metrics")
 
 
 def analyze_correlation(args):
@@ -157,10 +165,10 @@ def analyze_correlation(args):
         return
     
     ca = CorrelationAnalysis(client, experiment, outputs)
-    correlations = ca.analyze_correlation(method=args.method)
+    correlations = ca.analyze_correlations(method=args.method)
     
     if args.plot:
-        ca.plot_correlation(correlations)
+        ca.plot_correlation_matrix(correlations)
     else:
         print(f"Correlation results: {correlations}")
 
@@ -181,7 +189,11 @@ def detect_idle_resources(args):
         return
     
     ird = IdleResourceDetection(client, experiment, outputs)
-    idle = ird.detect_idle_resources(threshold=args.threshold)
+    idle = ird.analyze_idle_resources(
+        cpu_idle_threshold=args.cpu_idle_threshold,
+        memory_idle_threshold=args.memory_idle_threshold,
+        disk_idle_threshold=args.disk_idle_threshold,
+    )
     print(f"Idle resources: {idle}")
 
 
@@ -201,8 +213,8 @@ def plan_capacity(args):
         return
     
     cp = CapacityPlanning(client, experiment, outputs)
-    plan = cp.plan_capacity(horizon=args.horizon)
-    print(f"Capacity plan: {plan}")
+    plan = cp.forecast_capacity(forecast_steps=args.horizon)
+    print(f"Capacity forecast: {plan}")
 
 
 def list_experiments(args):
@@ -223,28 +235,6 @@ def delete_experiment(args):
     client = TMLLClient(args.host, args.port, verbose=args.verbose)
     client.tsp_client.delete_experiment(args.experiment)
     print(f"Deleted experiment: {args.experiment}")
-
-
-def cluster_data(args):
-    """Perform clustering analysis"""
-    client = TMLLClient(args.host, args.port, verbose=args.verbose)
-    experiment = get_experiment(client, args.experiment)
-    
-    if not experiment:
-        print("Experiment not found")
-        return
-    
-    outputs = experiment.find_outputs(keyword=args.keywords, type=['xy'])
-    
-    if not outputs:
-        print("No outputs found")
-        return
-    
-    outputs_with_tree = client.fetch_outputs_with_tree(experiment, [o.id for o in outputs])
-    data = client.fetch_data(experiment, outputs_with_tree)
-    clustering = Clustering(data, n_clusters=args.n_clusters, model=args.method)
-    clusters = clustering.get_clusters()
-    print(f"Clustering results:\n{clusters}")
 
 
 def main():
@@ -287,7 +277,7 @@ def main():
     
     # anomaly command
     anomaly_parser = subparsers.add_parser("anomaly", help="Detect anomalies")
-    anomaly_parser.add_argument("experiment", help="Experiment UUID or name")
+    anomaly_parser.add_argument("experiment", help="Experiment UUID")
     anomaly_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu usage"], help="Output keywords")
     anomaly_parser.add_argument("-m", "--method", default="iforest", help="Detection method")
     anomaly_parser.add_argument("-p", "--plot", action="store_true", help="Plot anomalies")
@@ -295,21 +285,22 @@ def main():
     
     # memory-leak command
     memleak_parser = subparsers.add_parser("memory-leak", help="Detect memory leaks")
-    memleak_parser.add_argument("experiment", help="Experiment UUID or name")
+    memleak_parser.add_argument("experiment", help="Experiment UUID")
     memleak_parser.add_argument("-k", "--keywords", nargs="+", default=["memory"], help="Output keywords")
     memleak_parser.set_defaults(func=detect_memory_leak)
     
     # changepoint command
     cp_parser = subparsers.add_parser("changepoint", help="Detect change points")
-    cp_parser.add_argument("experiment", help="Experiment UUID or name")
+    cp_parser.add_argument("experiment", help="Experiment UUID")
     cp_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu usage"], help="Output keywords")
-    cp_parser.add_argument("-m", "--method", default="pelt", help="Detection method")
+    cp_parser.add_argument("-m", "--methods", nargs="+", default=["single", "zscore", "voting", "pca"],
+                           help="Analysis methods (single, zscore, voting, pca)")
     cp_parser.add_argument("-p", "--plot", action="store_true", help="Plot change points")
     cp_parser.set_defaults(func=detect_changepoints)
     
     # correlation command
     corr_parser = subparsers.add_parser("correlation", help="Analyze correlation")
-    corr_parser.add_argument("experiment", help="Experiment UUID or name")
+    corr_parser.add_argument("experiment", help="Experiment UUID")
     corr_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu", "memory"], help="Output keywords")
     corr_parser.add_argument("-m", "--method", default="pearson", help="Correlation method")
     corr_parser.add_argument("-p", "--plot", action="store_true", help="Plot correlation")
@@ -317,25 +308,19 @@ def main():
     
     # idle-resources command
     idle_parser = subparsers.add_parser("idle-resources", help="Detect idle resources")
-    idle_parser.add_argument("experiment", help="Experiment UUID or name")
+    idle_parser.add_argument("experiment", help="Experiment UUID")
     idle_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu usage"], help="Output keywords")
-    idle_parser.add_argument("-t", "--threshold", type=float, default=5.0, help="Idle threshold")
+    idle_parser.add_argument("--cpu-idle-threshold", type=float, default=5.0, help="CPU idle threshold percentage")
+    idle_parser.add_argument("--memory-idle-threshold", type=float, default=5.0, help="Memory idle threshold percentage")
+    idle_parser.add_argument("--disk-idle-threshold", type=float, default=5.0, help="Disk idle threshold percentage")
     idle_parser.set_defaults(func=detect_idle_resources)
     
     # capacity command
     capacity_parser = subparsers.add_parser("capacity", help="Perform capacity planning")
-    capacity_parser.add_argument("experiment", help="Experiment UUID or name")
+    capacity_parser.add_argument("experiment", help="Experiment UUID")
     capacity_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu usage"], help="Output keywords")
-    capacity_parser.add_argument("-H", "--horizon", type=int, default=30, help="Planning horizon (days)")
+    capacity_parser.add_argument("-H", "--horizon", type=int, default=100, help="Forecast steps")
     capacity_parser.set_defaults(func=plan_capacity)
-    
-    # cluster command
-    cluster_parser = subparsers.add_parser("cluster", help="Perform clustering analysis")
-    cluster_parser.add_argument("experiment", help="Experiment UUID or name")
-    cluster_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu usage"], help="Output keywords")
-    cluster_parser.add_argument("-n", "--n-clusters", type=int, default=3, help="Number of clusters")
-    cluster_parser.add_argument("-m", "--method", default="kmeans", help="Clustering method")
-    cluster_parser.set_defaults(func=cluster_data)
     
     args = parser.parse_args()
     
