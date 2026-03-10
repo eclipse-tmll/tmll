@@ -16,6 +16,7 @@ from tmll.common.models.output import Output
 from tmll.common.models.timegraph.timegraph import TimeGraph
 from tmll.common.models.trace import Trace
 from tmll.common.models.experiment import Experiment
+from tmll.common.models.tree.node import NodeTree
 from tmll.common.models.tree.tree import Tree
 
 from tmll.tsp.tsp.indexing_status import IndexingStatus
@@ -221,7 +222,22 @@ class TMLLClient:
 
             # Get the trees of the outputs
             match output.type:
-                case "TABLE" | "DATA_TREE":
+                case "TABLE":
+                    response = self.tsp_client.fetch_virtual_table_columns(exp_uuid=experiment.uuid, output_id=output.id)
+                    if response.status_code != 200:
+                        self.logger.error(f"Failed to fetch table columns. Error: {response.status_text}")
+                        continue
+
+                    columns = response.model.model.columns
+                    tree = Tree([NodeTree(name=col.name, id=col.id, parent_id=-1) for col in columns])
+                    fetched_outputs.append({
+                        "output": output,
+                        "tree": tree
+                    })
+                    self.logger.info(f"Output '{output.name}' and its tree fetched successfully.")
+                    continue
+
+                case "DATA_TREE":
                     while True:
                         response = self.tsp_client.fetch_datatree(exp_uuid=experiment.uuid, output_id=output.id)
                         if response.status_code != 200:
@@ -264,6 +280,10 @@ class TMLLClient:
                 case _:
                     self.logger.warning(f"Output type '{output.type}' is not supported.")
                     continue
+
+            if response.model is None:
+                self.logger.warning(f"Tree of the output '{output.name}' is None.")
+                continue
 
             model = response.model.model
             if model is None:
