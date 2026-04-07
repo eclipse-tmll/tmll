@@ -80,9 +80,9 @@ class AnomalyDetection(BaseModule):
         self._process(outputs, **kwargs)
 
     def _process(self, outputs: Optional[List[Output]] = None, **kwargs) -> None:
+        kwargs.setdefault("min_size", MINIMUM_REQUIRED_DATAPOINTS)
         super()._process(outputs=outputs,
                          normalize=False,
-                         min_size=kwargs.get("min_size", MINIMUM_REQUIRED_DATAPOINTS),
                          **kwargs)
 
     def _post_process(self, **kwargs) -> None:
