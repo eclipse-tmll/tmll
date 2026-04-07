@@ -68,22 +68,22 @@ def fetch_data_cmd(args):
     data = client.fetch_data(experiment, outputs_with_tree)
     
     if args.output:
-        for key, value in data.items():
-            if isinstance(value, pd.DataFrame):
-                value.to_csv(f"{args.output}_{key}.csv", index=False)
-            elif isinstance(value, dict):
-                for sub_key, df in value.items():
-                    if isinstance(df, pd.DataFrame):
-                        df.to_csv(f"{args.output}_{key}_{sub_key}.csv", index=False)
+        for output_id, content in data.items():
+            if isinstance(content, dict):
+                for series_name, df in content.items():
+                    safe_name = series_name.replace("->", "_").replace(" ", "_")
+                    df.to_csv(f"{args.output}_{output_id}_{safe_name}.csv", index=False)
+            elif isinstance(content, pd.DataFrame):
+                content.to_csv(f"{args.output}_{output_id}.csv", index=False)
         print(f"Data exported to {args.output}_*.csv")
     else:
-        result = {}
+        serializable_data = {}
         for k, v in data.items():
-            if isinstance(v, pd.DataFrame):
-                result[k] = v.to_dict()
-            elif isinstance(v, dict):
-                result[k] = {sk: sv.to_dict() for sk, sv in v.items() if isinstance(sv, pd.DataFrame)}
-        print(json.dumps(result, indent=2, default=str))
+            if isinstance(v, dict):
+                serializable_data[k] = {sk: sv.to_dict() for sk, sv in v.items() if isinstance(sv, pd.DataFrame)}
+            elif isinstance(v, pd.DataFrame):
+                serializable_data[k] = v.to_dict()
+        print(json.dumps(serializable_data, indent=2, default=str))
 
 
 def detect_anomalies(args):
@@ -101,14 +101,30 @@ def detect_anomalies(args):
         print("No outputs found matching criteria")
         return
     
-    ad = AnomalyDetection(client, experiment, outputs)
+    ad = AnomalyDetection(client, experiment, outputs, resample_freq=args.resample_freq, min_size=args.min_size)
     result = ad.find_anomalies(method=args.method)
     
     if args.plot:
         ad.plot_anomalies(result)
     else:
-        total = sum(len(df) for df in result.anomalies.values())
+        total = sum(len(df[df.filter(regex="_is_anomaly$").any(axis=1)]) for df in result.anomalies.values())
         print(f"Found {total} anomalies across {len(result.anomalies)} outputs")
+        
+        if total > 0:
+            print("\nTop 3 Anomalies:")
+            all_anomalies = []
+            for name, df in result.anomalies.items():
+                is_anomaly = df.filter(regex="_is_anomaly$").any(axis=1)
+                anomaly_df = df[is_anomaly].copy()
+                anomaly_df["source"] = name
+                all_anomalies.append(anomaly_df)
+            
+            if all_anomalies:
+                combined_anomalies = pd.concat(all_anomalies)
+                if "anomaly_score" in combined_anomalies.columns:
+                    top_3 = combined_anomalies.sort_values("anomaly_score", ascending=False).head(3)
+                    for i, (idx, row) in enumerate(top_3.iterrows(), 1):
+                        print(f"{i}. Time: {idx}, Source: {row['source']}, Score: {row['anomaly_score']:.4f}")
 
 
 def detect_memory_leak(args):
@@ -281,6 +297,8 @@ def main():
     anomaly_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu usage"], help="Output keywords")
     anomaly_parser.add_argument("-m", "--method", default="iforest", help="Detection method")
     anomaly_parser.add_argument("-p", "--plot", action="store_true", help="Plot anomalies")
+    anomaly_parser.add_argument("-H", "--resample-freq", default="1s", help="Resampling frequency")
+    anomaly_parser.add_argument("-s", "--min-size", type=int, default=10, help="Minimum data points")
     anomaly_parser.set_defaults(func=detect_anomalies)
     
     # memory-leak command

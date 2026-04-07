@@ -120,7 +120,7 @@ TMLL provides an MCP (Model Context Protocol) server that exposes trace analysis
   "mcpServers": {
     "tmll": {
       "command": "python3",
-      "args": ["/path/to/tmll/mcp_server.py"]
+      "args": ["/path/to/tmll/mcp_server_cli.py"]
     }
   }
 }
@@ -128,6 +128,7 @@ TMLL provides an MCP (Model Context Protocol) server that exposes trace analysis
 
 ### Available Tools
 
+- `ensure_server`: Check if the Trace Compass server is running; downloads, installs, and starts it automatically if not found
 - `create_experiment`: Create trace experiments from files
 - `list_outputs`: List available outputs for an experiment
 - `fetch_data`: Fetch data from experiment outputs
