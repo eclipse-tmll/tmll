@@ -141,36 +141,31 @@ class BaseModule(ABC):
             self.logger.error("No data fetched")
             return
 
+        self.logger.info(f"Fetched data for {len(data)} outputs")
         self.outputs = outputs
 
         # Process each output
-        for output_key, output_data in data.items():
-            shortened = output_key.split("$")[0]
-            converted = next(iter(output for output in outputs if output.id == shortened), None) if outputs else None
-            shortened = converted.name if converted else shortened
+        for output_id, output_content in data.items():
+            converted = next(iter(output for output in outputs if output.id == output_id), None) if outputs else None
+            self.logger.info(f"Processing output {output_id}, type(content)={type(output_content)}")
+            
+            # If output_content is a dict, it's TREE_TIME_XY with series
+            if isinstance(output_content, dict):
+                self.logger.info(f"Output {output_id} has {len(output_content)} series")
+                for series_name, df in output_content.items():
+                    name = f"{converted.name if converted else output_id} - {series_name}"
+                    self.logger.info(f"Adding series {name} with {len(df)} rows")
+                    self._add_dataframe(name, df, converted, **kwargs)
+            else:
+                name = converted.name if converted else output_id
+                self.logger.info(f"Adding output {name} with {len(output_content)} rows")
+                self._add_dataframe(name, output_content, converted, **kwargs)
 
-            if shortened not in self.dataframes:
-                df = output_data
-
-                if converted and converted.type == "TIME_GRAPH":
-                    df = df.rename({"start_time": "timestamp"}, axis=1)
-                    df["end_time"] = pd.to_datetime(df["end_time"])
-
-                # Apply common preprocessing steps
-                if kwargs.get("normalize", True):
-                    df = self.data_preprocessor.normalize(df)
-                if kwargs.get("convert_datetime", True):
-                    df = self.data_preprocessor.convert_to_datetime(df)
-                if kwargs.get("resample", True):
-                    df = self.data_preprocessor.resample(df, frequency=kwargs.get("resample_freq", "1s"))
-                if kwargs.get("remove_minimum", False):
-                    df = self.data_preprocessor.remove_minimum(df)
-
-                self.dataframes[shortened] = df
-
+        self.logger.info(f"Dataframes before filtering: {list(self.dataframes.keys())}")
         # Filter out dataframes with less than min_size instances
         min_size = kwargs.get("min_size", 1)
         self.dataframes = {k: v for k, v in self.dataframes.items() if len(v) >= min_size}
+        self.logger.info(f"Dataframes after filtering (min_size={min_size}): {list(self.dataframes.keys())}")
 
         # Align timestamps if needed
         if kwargs.get("align_timestamps", True) and self.dataframes:
@@ -178,6 +173,28 @@ class BaseModule(ABC):
 
         # Call module-specific post-processing
         self._post_process(**kwargs)
+
+    def _add_dataframe(self, name: str, df: pd.DataFrame, output: Optional[Output], **kwargs) -> None:
+        """Helper to preprocess and add a dataframe to self.dataframes"""
+        if name not in self.dataframes:
+            if output and output.type == "TIME_GRAPH":
+                df = df.rename({"start_time": "timestamp"}, axis=1)
+                df["end_time"] = pd.to_datetime(df["end_time"])
+
+            if output and output.type == "TREE_TIME_XY":
+                df = df.rename(columns={"x": "timestamp", "y": "value"})
+
+            # Apply common preprocessing steps
+            if kwargs.get("normalize", True):
+                df = self.data_preprocessor.normalize(df)
+            if kwargs.get("convert_datetime", True):
+                df = self.data_preprocessor.convert_to_datetime(df)
+            if kwargs.get("resample", True):
+                df = self.data_preprocessor.resample(df, frequency=kwargs.get("resample_freq", "1s"))
+            if kwargs.get("remove_minimum", False):
+                df = self.data_preprocessor.remove_minimum(df)
+
+            self.dataframes[name] = df
 
     @abstractmethod
     def _post_process(self, **kwargs) -> None:

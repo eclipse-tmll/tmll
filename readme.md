@@ -114,13 +114,17 @@ TMLL provides an MCP (Model Context Protocol) server that exposes trace analysis
 ./tracecompass-server -vmargs -Dtraceserver.port=8080
 ```
 
-3. Configure in your MCP client (e.g., `~/.config/kiro-cli/mcp.json`):
+3. Configure in your MCP client (e.g., `~/.config/kiro-cli/mcp.json`). Point `command` at the Python interpreter of the environment where TMLL is installed, and set `PYTHONPATH` so the `tmll` package is importable:
 ```json
 {
   "mcpServers": {
     "tmll": {
-      "command": "python3",
-      "args": ["/path/to/tmll/mcp_server_cli.py"]
+      "type": "stdio",
+      "command": "/path/to/tmll/venv/bin/python",
+      "args": ["-m", "tmll.mcp.server"],
+      "env": {
+        "PYTHONPATH": "/path/to/tmll"
+      }
     }
   }
 }
@@ -138,7 +142,6 @@ TMLL provides an MCP (Model Context Protocol) server that exposes trace analysis
 - `analyze_correlation`: Perform root cause correlation analysis
 - `detect_idle_resources`: Identify underutilized resources
 - `plan_capacity`: Run capacity planning predictions
-- `cluster_data`: Perform clustering analysis
 
 ## CLI Usage
 
