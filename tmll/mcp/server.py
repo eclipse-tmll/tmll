@@ -1,20 +1,48 @@
 #!/usr/bin/env python3
 """MCP server for TMLL CLI - exposes all CLI commands as MCP tools."""
 
-import asyncio
-import json
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.server.fastmcp import FastMCP
 
-server = Server("tmll-cli-mcp-server")
+mcp = FastMCP("tmll-cli-mcp-server")
 
 CLI_PATH = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parent / "cli.py")
+
+DEFAULT_HOST = "localhost"
+DEFAULT_PORT = 8080
+
+
+def _server_is_running(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
+    """Check if the trace server is reachable."""
+    try:
+        urllib.request.urlopen(f"http://{host}:{port}/tsp/api/health", timeout=3)
+        return True
+    except Exception:
+        return False
+
+
+@mcp.tool()
+def ensure_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> str:
+    """Ensure the Trace Compass server is running. Downloads and installs it if not found, then starts it."""
+    if _server_is_running(host, port):
+        return f"Trace server already running at {host}:{port}"
+
+    from tmll.services.tsp_installer import TSPInstaller
+    installer = TSPInstaller()
+    installer.install()
+
+    import time
+    for _ in range(15):
+        time.sleep(2)
+        if _server_is_running(host, port):
+            return f"Trace server started at {host}:{port}"
+
+    return "Trace server was launched but is not yet responding. It may need more time to start."
 
 
 def run_cli(*args: str) -> str:
@@ -28,11 +56,10 @@ def run_cli(*args: str) -> str:
     return result.stdout.strip()
 
 
-def build_args(arguments: dict, flag_map: dict[str, str]) -> list[str]:
-    """Convert tool arguments to CLI flags."""
+def build_args(flag_map: dict[str, tuple[str, any]]) -> list[str]:
+    """Convert (flag, value) pairs to CLI flags."""
     args = []
-    for key, flag in flag_map.items():
-        val = arguments.get(key)
+    for flag, val in flag_map.values():
         if val is None:
             continue
         if isinstance(val, bool):
@@ -45,204 +72,96 @@ def build_args(arguments: dict, flag_map: dict[str, str]) -> list[str]:
     return args
 
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    return [
-        Tool(
-            name="create_experiment",
-            description="Create a trace experiment from LTTng trace files or directories.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "traces": {"type": "array", "items": {"type": "string"}, "description": "Trace file/directory paths"},
-                    "experiment_name": {"type": "string"},
-                    "host": {"type": "string", "default": "localhost"},
-                    "port": {"type": "integer", "default": 8080},
-                },
-                "required": ["traces", "experiment_name"],
-            },
-        ),
-        Tool(
-            name="list_experiments",
-            description="List all open experiments",
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="list_outputs",
-            description="List available outputs for an experiment",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="fetch_data",
-            description="Fetch data from experiment outputs",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "default": ["cpu usage"]},
-                    "output_file": {"type": "string", "description": "CSV output file prefix"},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="delete_experiment",
-            description="Delete an experiment",
-            inputSchema={
-                "type": "object",
-                "properties": {"experiment_id": {"type": "string"}},
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="detect_anomalies",
-            description="Detect anomalies in trace data using ML methods (iforest, zscore, iqr, moving_average, seasonality, frequency_domain, combined)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "default": ["cpu usage"]},
-                    "method": {"type": "string", "default": "iforest", "enum": ["iforest", "zscore", "iqr", "moving_average", "seasonality", "frequency_domain", "combined"]},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="detect_memory_leak",
-            description="Detect memory leaks in trace data",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "default": ["memory"]},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="detect_changepoints",
-            description="Detect change points in performance trends (single, zscore, voting, pca)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "default": ["cpu usage"]},
-                    "methods": {"type": "array", "items": {"type": "string"}, "default": ["single", "zscore", "voting", "pca"],
-                               "description": "Analysis methods (single, zscore, voting, pca)"},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="analyze_correlation",
-            description="Analyze correlation between outputs for root cause analysis (pearson, kendall, spearman)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "default": ["cpu", "memory"]},
-                    "method": {"type": "string", "default": "pearson", "enum": ["pearson", "spearman", "kendall"]},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="detect_idle_resources",
-            description="Detect idle/underutilized resources",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "default": ["cpu usage"]},
-                    "cpu_idle_threshold": {"type": "number", "default": 5.0, "description": "CPU idle threshold percentage"},
-                    "memory_idle_threshold": {"type": "number", "default": 5.0, "description": "Memory idle threshold percentage"},
-                    "disk_idle_threshold": {"type": "number", "default": 5.0, "description": "Disk idle threshold percentage"},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-        Tool(
-            name="plan_capacity",
-            description="Perform capacity planning with predictive models",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "experiment_id": {"type": "string"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "default": ["cpu usage"]},
-                    "horizon": {"type": "integer", "default": 100, "description": "Number of forecast steps"},
-                },
-                "required": ["experiment_id"],
-            },
-        ),
-    ]
+def _global_args(host: Optional[str], port: Optional[int]) -> list[str]:
+    args = []
+    if host:
+        args.extend(["--host", host])
+    if port:
+        args.extend(["--port", str(port)])
+    return args
 
 
-@server.call_tool()
-async def call_tool(name: str, arguments: Optional[dict] = None) -> list[TextContent]:
-    arguments = arguments if isinstance(arguments, dict) else {}
-    global_args = build_args(arguments, {"host": "--host", "port": "--port"})
-
-    if name == "create_experiment":
-        out = run_cli(*global_args, "create", *arguments["traces"], "-n", arguments["experiment_name"])
-
-    elif name == "list_experiments":
-        out = run_cli(*global_args, "list")
-
-    elif name == "list_outputs":
-        args = build_args(arguments, {"keywords": "-k"})
-        out = run_cli(*global_args, "list-outputs", arguments["experiment_id"], *args)
-
-    elif name == "fetch_data":
-        args = build_args(arguments, {"keywords": "-k", "output_file": "-o"})
-        out = run_cli(*global_args, "fetch-data", arguments["experiment_id"], *args)
-
-    elif name == "delete_experiment":
-        out = run_cli(*global_args, "delete", arguments["experiment_id"])
-
-    elif name == "detect_anomalies":
-        args = build_args(arguments, {"keywords": "-k", "method": "-m"})
-        out = run_cli(*global_args, "anomaly", arguments["experiment_id"], *args)
-
-    elif name == "detect_memory_leak":
-        args = build_args(arguments, {"keywords": "-k"})
-        out = run_cli(*global_args, "memory-leak", arguments["experiment_id"], *args)
-
-    elif name == "detect_changepoints":
-        args = build_args(arguments, {"keywords": "-k", "methods": "-m"})
-        out = run_cli(*global_args, "changepoint", arguments["experiment_id"], *args)
-
-    elif name == "analyze_correlation":
-        args = build_args(arguments, {"keywords": "-k", "method": "-m"})
-        out = run_cli(*global_args, "correlation", arguments["experiment_id"], *args)
-
-    elif name == "detect_idle_resources":
-        args = build_args(arguments, {"keywords": "-k",
-                                       "cpu_idle_threshold": "--cpu-idle-threshold",
-                                       "memory_idle_threshold": "--memory-idle-threshold",
-                                       "disk_idle_threshold": "--disk-idle-threshold"})
-        out = run_cli(*global_args, "idle-resources", arguments["experiment_id"], *args)
-
-    elif name == "plan_capacity":
-        args = build_args(arguments, {"keywords": "-k", "horizon": "-H"})
-        out = run_cli(*global_args, "capacity", arguments["experiment_id"], *args)
-
-    else:
-        raise ValueError(f"Unknown tool: {name}")
-
-    return [TextContent(type="text", text=out)]
+@mcp.tool()
+def create_experiment(traces: list[str], experiment_name: str, host: Optional[str] = None, port: Optional[int] = None) -> str:
+    """Create a trace experiment from LTTng trace files or directories."""
+    return run_cli(*_global_args(host, port), "create", *traces, "-n", experiment_name)
 
 
-async def main():
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+@mcp.tool()
+def list_experiments() -> str:
+    """List all open experiments."""
+    return run_cli("list")
+
+
+@mcp.tool()
+def list_outputs(experiment_id: str, keywords: Optional[list[str]] = None) -> str:
+    """List available outputs for an experiment."""
+    args = build_args({"keywords": ("-k", keywords)})
+    return run_cli("list-outputs", experiment_id, *args)
+
+
+@mcp.tool()
+def fetch_data(experiment_id: str, keywords: Optional[list[str]] = None, output_file: Optional[str] = None) -> str:
+    """Fetch data from experiment outputs."""
+    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "output_file": ("-o", output_file)})
+    return run_cli("fetch-data", experiment_id, *args)
+
+
+@mcp.tool()
+def delete_experiment(experiment_id: str) -> str:
+    """Delete an experiment."""
+    return run_cli("delete", experiment_id)
+
+
+@mcp.tool()
+def detect_anomalies(experiment_id: str, keywords: Optional[list[str]] = None, method: Optional[str] = None, resample_freq: Optional[str] = None) -> str:
+    """Detect anomalies in trace data using ML methods (iforest, zscore, iqr, moving_average, seasonality, frequency_domain, combined)."""
+    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "method": ("-m", method or "iforest"), "resample_freq": ("-H", resample_freq)})
+    return run_cli("anomaly", experiment_id, *args)
+
+
+@mcp.tool()
+def detect_memory_leak(experiment_id: str, keywords: Optional[list[str]] = None) -> str:
+    """Detect memory leaks in trace data."""
+    args = build_args({"keywords": ("-k", keywords or ["memory"])})
+    return run_cli("memory-leak", experiment_id, *args)
+
+
+@mcp.tool()
+def detect_changepoints(experiment_id: str, keywords: Optional[list[str]] = None, methods: Optional[list[str]] = None) -> str:
+    """Detect change points in performance trends (single, zscore, voting, pca)."""
+    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "methods": ("-m", methods or ["single", "zscore", "voting", "pca"])})
+    return run_cli("changepoint", experiment_id, *args)
+
+
+@mcp.tool()
+def analyze_correlation(experiment_id: str, keywords: Optional[list[str]] = None, method: Optional[str] = None) -> str:
+    """Analyze correlation between outputs for root cause analysis (pearson, kendall, spearman)."""
+    args = build_args({"keywords": ("-k", keywords or ["cpu", "memory"]), "method": ("-m", method or "pearson")})
+    return run_cli("correlation", experiment_id, *args)
+
+
+@mcp.tool()
+def detect_idle_resources(experiment_id: str, keywords: Optional[list[str]] = None,
+                          cpu_idle_threshold: Optional[float] = None,
+                          memory_idle_threshold: Optional[float] = None,
+                          disk_idle_threshold: Optional[float] = None) -> str:
+    """Detect idle/underutilized resources."""
+    args = build_args({
+        "keywords": ("-k", keywords or ["cpu usage"]),
+        "cpu": ("--cpu-idle-threshold", cpu_idle_threshold),
+        "memory": ("--memory-idle-threshold", memory_idle_threshold),
+        "disk": ("--disk-idle-threshold", disk_idle_threshold),
+    })
+    return run_cli("idle-resources", experiment_id, *args)
+
+
+@mcp.tool()
+def plan_capacity(experiment_id: str, keywords: Optional[list[str]] = None, horizon: Optional[int] = None) -> str:
+    """Perform capacity planning with predictive models."""
+    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "horizon": ("-H", horizon or 100)})
+    return run_cli("capacity", experiment_id, *args)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    mcp.run()
