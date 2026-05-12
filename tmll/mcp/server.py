@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP, Image
+from mcp.types import ToolAnnotations
 
 # Prevent stray print() calls from corrupting the MCP stdio JSON transport.
 # MCP's stdio_server reads sys.stdout.buffer, so we must preserve it.
@@ -124,20 +125,24 @@ def create_experiment(traces: list[str], experiment_name: str, host: Optional[st
     return run_cli(*_global_args(host, port), "create", *traces, "-n", experiment_name)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_experiments() -> str:
-    """List all open experiments."""
+    """List all open experiments. Returns name-UUID pairs.
+
+    If a user refers to an experiment by name, call this tool first to resolve the name to its UUID.
+    All other tools require the experiment UUID, not the name.
+    """
     return run_cli("list")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_outputs(experiment_id: str, keywords: Optional[list[str]] = None) -> str:
     """List available outputs for an experiment."""
     args = build_args({"keywords": ("-k", keywords)})
     return run_cli("list-outputs", experiment_id, *args)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def fetch_data(experiment_id: str, keywords: Optional[list[str]] = None, output_file: Optional[str] = None) -> str:
     """Fetch data from experiment outputs."""
     args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "output_file": ("-o", output_file)})
@@ -150,7 +155,7 @@ def delete_experiment(experiment_id: str) -> str:
     return run_cli("delete", experiment_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def detect_anomalies(experiment_id: str, keywords: Optional[list[str]] = None, method: Optional[str] = None, resample_freq: Optional[str] = None) -> str:
     """Detect anomalies in trace data using ML methods (iforest, zscore, iqr, moving_average, seasonality, frequency_domain, combined)."""
     args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "method": ("-m", method or "iforest"), "resample_freq": ("-H", resample_freq)})
@@ -164,14 +169,14 @@ def detect_memory_leak(experiment_id: str, keywords: Optional[list[str]] = None)
     return run_cli("memory-leak", experiment_id, *args)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def detect_changepoints(experiment_id: str, keywords: Optional[list[str]] = None, methods: Optional[list[str]] = None) -> str:
     """Detect change points in performance trends (single, zscore, voting, pca)."""
     args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "methods": ("-m", methods or ["single", "zscore", "voting", "pca"])})
     return run_cli("changepoint", experiment_id, *args)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def analyze_correlation(experiment_id: str, keywords: Optional[list[str]] = None, method: Optional[str] = None) -> str:
     """Analyze correlation between outputs for root cause analysis (pearson, kendall, spearman)."""
     args = build_args({"keywords": ("-k", keywords or ["cpu", "memory"]), "method": ("-m", method or "pearson")})
@@ -193,14 +198,14 @@ def detect_idle_resources(experiment_id: str, keywords: Optional[list[str]] = No
     return run_cli("idle-resources", experiment_id, *args)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def plan_capacity(experiment_id: str, keywords: Optional[list[str]] = None, horizon: Optional[int] = None) -> str:
     """Perform capacity planning with predictive models."""
     args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "horizon": ("-H", horizon or 100)})
     return run_cli("capacity", experiment_id, *args)
 
 
-@mcp.tool(meta={"ui": {"resourceUri": XY_UI_URI}})
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False), meta={"ui": {"resourceUri": XY_UI_URI}})
 def plot_xy_with_anomalies(
     experiment_id: str,
     keywords: Optional[list[str]] = None,
