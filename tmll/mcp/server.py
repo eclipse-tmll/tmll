@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """MCP server for TMLL CLI - exposes all CLI commands as MCP tools."""
 
-import base64
 import contextlib
-import io
 import json
 import subprocess
 import sys
@@ -11,13 +9,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import pandas as pd
-
-from mcp.server.fastmcp import FastMCP
-from mcp.types import ImageContent, TextContent
+from mcp.server.fastmcp import FastMCP, Image
 
 # Prevent stray print() calls from corrupting the MCP stdio JSON transport.
 # MCP's stdio_server reads sys.stdout.buffer, so we must preserve it.
@@ -38,10 +30,17 @@ sys.stdout = _StderrWithBuffer()
 
 mcp = FastMCP("tmll-cli-mcp-server")
 
+_last_xy_payload: dict = {}
+
 CLI_PATH = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parent / "cli.py")
+UI_DIR = Path(__file__).resolve().parent / "ui"
 
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 8080
+
+# MCP Apps spec: HTML UI resource that hosts render in a sandboxed iframe.
+XY_UI_URI = "ui://tmll/xy-anomalies.html"
+MCP_APP_MIME = "text/html;profile=mcp-app"
 
 
 @contextlib.contextmanager
@@ -201,98 +200,150 @@ def plan_capacity(experiment_id: str, keywords: Optional[list[str]] = None, hori
     return run_cli("capacity", experiment_id, *args)
 
 
-@mcp.tool()
+@mcp.tool(meta={"ui": {"resourceUri": XY_UI_URI}})
 def plot_xy_with_anomalies(
     experiment_id: str,
     keywords: Optional[list[str]] = None,
     method: Optional[str] = None,
+    resample_freq: Optional[str] = None,
     host: Optional[str] = None,
     port: Optional[int] = None,
-    resample_freq: Optional[str] = None,
-) -> list[TextContent | ImageContent]:
-    """Fetch XY data from an experiment, run anomaly detection, and return an annotated plot image with a text summary."""
-    from tmll.tmll_client import TMLLClient
-    from tmll.common.models.experiment import Experiment
-    from tmll.ml.modules.anomaly_detection.anomaly_detection_module import AnomalyDetection
+    as_image: Optional[bool] = None,
+):
+    """Detect anomalies on XY outputs and return interactive plot data.
 
+    This tool is READ-ONLY and does not modify any experiment data.
+
+    Args:
+        experiment_id: Required. The UUID of an existing experiment. If the user refers to an
+            experiment by name, call list_experiments first to get the name-UUID mapping.
+        keywords: Optional list of keywords to filter outputs, e.g. ["cpu usage"]. Defaults to ["cpu usage"].
+        method: Optional anomaly detection method. Must be one of: "iforest", "zscore", "iqr",
+            "moving_average", "seasonality", "frequency_domain", "combined". Defaults to "iforest".
+        resample_freq: Optional pandas resample frequency string, e.g. "1s", "100ms". Leave None for auto.
+        host: Optional trace server host. Defaults to "localhost".
+        port: Optional trace server port. Defaults to 8080.
+        as_image: If True (default), returns a rendered PNG image. If False, returns a JSON object
+            with { "type": "html", "html": "<full HTML content>" } for inline rendering.
+
+    Returns:
+        PNG image (when as_image is True/None) or JSON with type "html" and inline HTML content.
+
+    Important:
+        - experiment_id must be a valid UUID from an already-opened experiment.
+        - Do NOT invent or guess experiment IDs. Use list_experiments to get valid IDs.
+        - Do NOT pass output IDs as experiment_id.
+        - keywords filter which XY outputs to analyze; they are NOT output IDs.
+    """
+    global _last_xy_payload
     with _protect_stdout():
-        h = host or DEFAULT_HOST
-        p = port or DEFAULT_PORT
-        keywords = keywords or ["cpu usage"]
-        method = method or "iforest"
+        from tmll.tmll_client import TMLLClient
+        from tmll.common.models.experiment import Experiment
+        from tmll.ml.modules.anomaly_detection.anomaly_detection_module import AnomalyDetection
 
-        client = TMLLClient(h, p)
-
+        client = TMLLClient(host or DEFAULT_HOST, port or DEFAULT_PORT)
         resp = client.tsp_client.fetch_experiment(experiment_id)
         if resp.status_code != 200:
-            return [TextContent(type="text", text=f"Experiment {experiment_id} not found (status={resp.status_code}).")]
+            return json.dumps({"error": f"Experiment {experiment_id} not found", "series": {}})
+
         experiment = Experiment.from_tsp_experiment(resp.model)
         experiment.assign_outputs(client._fetch_outputs(experiment))
-
-        outputs = experiment.find_outputs(keyword=keywords, type=["xy"])
+        outputs = experiment.find_outputs(keyword=keywords or ["cpu usage"], type=["xy"])
         if not outputs:
-            return [TextContent(type="text", text="No XY outputs found matching keywords.")]
+            return json.dumps({"error": "No XY outputs match keywords", "series": {}})
 
-        ad_kwargs = {}
-        if resample_freq:
-            ad_kwargs["resample_freq"] = resample_freq
+        ad_kwargs = {"resample_freq": resample_freq} if resample_freq else {}
         ad = AnomalyDetection(client, experiment, outputs, **ad_kwargs)
-        result = ad.find_anomalies(method=method)
-        if not result or not result.anomalies:
-            return [TextContent(type="text", text="Anomaly detection returned no results.")]
+        result = ad.find_anomalies(method=method or "iforest")
+        if not result:
+            return json.dumps({"error": "Anomaly detection returned no results", "series": {}})
 
-        colors = plt.colormaps.get_cmap("tab10")
-        contents: list[TextContent | ImageContent] = []
-        total_anomalies = 0
+        series = {}
+        total = 0
+        for name, df in ad.dataframes.items():
+            anomaly_df = result.anomalies.get(name)
+            periods = [[str(s), str(e)] for s, e in result.anomaly_periods.get(name, [])]
+            ax, ay = [], []
+            if anomaly_df is not None and not anomaly_df.empty:
+                mask_cols = anomaly_df.filter(regex="_is_anomaly$")
+                mask = mask_cols.any(axis=1) if not mask_cols.empty else anomaly_df.any(axis=1)
+                for ts in anomaly_df.index[mask]:
+                    if ts in df.index:
+                        ax.append(str(ts))
+                        ay.append(float(df.loc[ts].iloc[0]))
+                total += int(mask.sum())
+            series[name] = {
+                "x": [str(i) for i in df.index],
+                "y": [float(v) for v in df.iloc[:, 0].tolist()],
+                "anomaly_x": ax,
+                "anomaly_y": ay,
+                "periods": periods,
+            }
 
-        for idx, (name, dataframe) in enumerate(ad.dataframes.items()):
-            anomaly_df = result.anomalies.get(name, pd.DataFrame())
-            periods = result.anomaly_periods.get(name, [])
+        payload = {
+            "summary": f"Found {total} anomalies across {len(series)} outputs using '{method or 'iforest'}'.",
+            "method": method or "iforest",
+            "series": series,
+        }
 
-            fig, ax = plt.subplots(figsize=(14, 4), dpi=120)
-            ax.plot(dataframe.index, dataframe.iloc[:, 0], color=colors(idx), linewidth=1.2, label=name)
+        if as_image is not False:
+            _last_xy_payload = payload
+            return _render_png(payload)
 
-            for i, (start, end) in enumerate(periods):
-                ax.axvspan(start, end, color="red", alpha=0.2, label="Anomaly Period" if i == 0 else None)
+        # Return self-contained HTML directly so MCP clients can render it.
+        _last_xy_payload = payload
+        html = _build_html(payload)
+        return json.dumps({"type": "html", "html": html})
 
-            if not anomaly_df.empty:
-                is_anomaly_cols = anomaly_df.filter(regex="_is_anomaly$")
-                if not is_anomaly_cols.empty:
-                    is_anomaly = is_anomaly_cols.any(axis=1)
-                else:
-                    is_anomaly = anomaly_df.any(axis=1)
-                n_anomaly_points = int(is_anomaly.sum())
-                total_anomalies += n_anomaly_points
 
-                for point in anomaly_df[is_anomaly].index:
-                    if any(s <= point <= e for s, e in periods):
-                        continue
-                    if point in dataframe.index:
-                        ax.scatter(point, dataframe.loc[point].values[0], color="red", s=40, zorder=5)
+_PLOTLY_JS = (UI_DIR / "plotly-basic.min.js").read_text(encoding="utf-8")
 
-            ax.set_title(f"Anomaly Detection: {name} ({method})")
-            ax.set_xlabel("Time")
-            ax.set_ylabel(name)
-            ax.legend(loc="upper right", fontsize=8)
-            fig.tight_layout()
 
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png")
-            plt.close(fig)
-            buf.seek(0)
-            contents.append(ImageContent(type="image", data=base64.b64encode(buf.read()).decode(), mimeType="image/png"))
+def _build_html(payload: dict | None = None) -> str:
+    """Return the XY anomalies HTML with Plotly inlined and optional payload baked in."""
+    template = (UI_DIR / "xy_anomalies.html").read_text(encoding="utf-8")
+    html = template.replace("/* __PLOTLY_INLINE__ */", _PLOTLY_JS)
+    if payload:
+        bootstrap = f"<script>window.__MCP_PAYLOAD__ = {json.dumps(payload)};</script>"
+        html = html.replace("</head>", bootstrap + "</head>", 1)
+    return html
 
-        period_summary = []
-        for name, periods in result.anomaly_periods.items():
-            for start, end in periods:
-                period_summary.append(f"  {name}: {start} → {end}")
 
-        summary = f"Found {total_anomalies} anomalies across {len(ad.dataframes)} outputs using '{method}'."
-        if period_summary:
-            summary += "\n\nAnomaly periods:\n" + "\n".join(period_summary)
+def _render_png(payload: dict) -> "Image":
+    """Render the anomaly payload to a PNG using matplotlib."""
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
 
-        contents.insert(0, TextContent(type="text", text=summary))
-        return contents
+    series = payload.get("series", {})
+    n = max(len(series), 1)
+    fig, axes = plt.subplots(n, 1, figsize=(10, 3 * n), squeeze=False)
+    for ax, (name, s) in zip(axes[:, 0], series.items()):
+        x = pd.to_datetime(s["x"])
+        ax.plot(x, s["y"], linewidth=1.2, label=name)
+        if s.get("anomaly_x"):
+            ax.scatter(pd.to_datetime(s["anomaly_x"]), s["anomaly_y"],
+                       color="red", marker="x", s=40, label="Anomalies", zorder=5)
+        for a, b in s.get("periods", []):
+            ax.axvspan(pd.to_datetime(a), pd.to_datetime(b), color="red", alpha=0.15)
+        ax.set_title(name)
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Value")
+        ax.legend(loc="best", fontsize=8)
+    fig.suptitle(payload.get("summary", ""), fontsize=10)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    return Image(data=buf.getvalue(), format="png")
+
+
+@mcp.resource(XY_UI_URI, mime_type=MCP_APP_MIME)
+def xy_anomalies_ui() -> str:
+    """Interactive iframe plot rendered by MCP Apps hosts for plot_xy_with_anomalies."""
+    return _build_html(_last_xy_payload or None)
 
 
 if __name__ == "__main__":
