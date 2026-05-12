@@ -142,6 +142,7 @@ TMLL provides an MCP (Model Context Protocol) server that exposes trace analysis
 - `analyze_correlation`: Perform root cause correlation analysis
 - `detect_idle_resources`: Identify underutilized resources
 - `plan_capacity`: Run capacity planning predictions
+- `plot_xy_with_anomalies`: Return an interactive XY anomaly plot (MCP App iframe UI)
 
 ## CLI Usage
 
@@ -176,9 +177,6 @@ tmll_cli.py detect-idle --experiment <UUID> --threshold 5
 
 # Run capacity planning
 tmll_cli.py plan-capacity --experiment <UUID> --horizon 30
-
-# Perform clustering
-tmll_cli.py cluster --experiment <UUID> --method kmeans --n-clusters 3
 ```
 
 ### Options
