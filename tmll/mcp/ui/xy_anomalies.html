@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>TMLL — XY Anomalies</title>
+<script>/* __PLOTLY_INLINE__ */</script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 8px; background: #fafafa; }
+  .plot { margin-bottom: 16px; }
+  .summary { padding: 8px 12px; background: #fff; border-left: 3px solid #1f77b4; margin-bottom: 12px; white-space: pre-wrap; }
+  .err { color: #b00; padding: 8px; }
+</style>
+</head>
+<body>
+<div id="summary" class="summary">Waiting for data…</div>
+<div id="plots"></div>
+<script>
+(() => {
+  const plotsEl = document.getElementById("plots");
+  const summaryEl = document.getElementById("summary");
+  let rendered = false;
+
+  const extractJson = (result) => {
+    if (!result) return null;
+    if (result.structuredContent && result.structuredContent.series) return result.structuredContent;
+    const c = (result.content || []).find(x => x.type === "text");
+    if (!c) return null;
+    try { return JSON.parse(c.text); } catch { return null; }
+  };
+
+  const render = (payload) => {
+    if (rendered || !payload) return;
+    rendered = true;
+    plotsEl.innerHTML = "";
+    summaryEl.textContent = payload.summary || "";
+    const series = payload.series || {};
+    Object.entries(series).forEach(([name, s], i) => {
+      const div = document.createElement("div");
+      div.className = "plot";
+      plotsEl.appendChild(div);
+      const traces = [{
+        x: s.x, y: s.y, mode: "lines", name: name, line: { width: 1.5 }
+      }];
+      if (s.anomaly_x && s.anomaly_x.length) {
+        traces.push({
+          x: s.anomaly_x, y: s.anomaly_y, mode: "markers", name: "Anomalies",
+          marker: { color: "red", size: 8, symbol: "x" }
+        });
+      }
+      const shapes = (s.periods || []).map(([a, b]) => ({
+        type: "rect", xref: "x", yref: "paper", x0: a, x1: b, y0: 0, y1: 1,
+        fillcolor: "red", opacity: 0.15, line: { width: 0 }
+      }));
+      Plotly.newPlot(div, traces, {
+        title: name, margin: { t: 40, r: 20, b: 40, l: 60 },
+        xaxis: { title: "Time" }, yaxis: { title: "Value" }, shapes,
+        height: 320
+      }, { responsive: true, displaylogo: false });
+    });
+    if (!Object.keys(series).length) {
+      plotsEl.innerHTML = '<div class="err">No series returned.</div>';
+    }
+  };
+
+  // MCP Apps postMessage listener — host delivers tool result.
+  window.addEventListener("message", (ev) => {
+    const m = ev.data;
+    if (!m || typeof m !== "object") return;
+    if (m.method === "ui/notifications/tool-result" && m.params) {
+      render(extractJson(m.params));
+    } else if (m.type === "tool-result" && m.result) {
+      // Alternate host convention
+      render(extractJson(m.result));
+    }
+  });
+
+  // Standalone-file mode: payload baked in by the server.
+  if (window.__MCP_PAYLOAD__) render(window.__MCP_PAYLOAD__);
+
+  // Signal ready (ui/initialize handshake subset; hosts that ignore it still work).
+  try {
+    window.parent.postMessage({ jsonrpc: "2.0", method: "ui/initialize", id: 1, params: { appCapabilities: {} } }, "*");
+  } catch {}
+})();
+</script>
+</body>
+</html>

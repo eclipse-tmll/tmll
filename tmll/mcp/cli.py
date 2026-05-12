@@ -101,7 +101,12 @@ def detect_anomalies(args):
         print("No outputs found matching criteria")
         return
     
-    ad = AnomalyDetection(client, experiment, outputs, resample_freq=args.resample_freq, min_size=args.min_size)
+    ad_kwargs = {}
+    if args.resample_freq:
+        ad_kwargs["resample_freq"] = args.resample_freq
+    if args.min_size is not None:
+        ad_kwargs["min_size"] = args.min_size
+    ad = AnomalyDetection(client, experiment, outputs, **ad_kwargs)
     result = ad.find_anomalies(method=args.method)
     
     if args.plot:
@@ -297,8 +302,8 @@ def main():
     anomaly_parser.add_argument("-k", "--keywords", nargs="+", default=["cpu usage"], help="Output keywords")
     anomaly_parser.add_argument("-m", "--method", default="iforest", help="Detection method")
     anomaly_parser.add_argument("-p", "--plot", action="store_true", help="Plot anomalies")
-    anomaly_parser.add_argument("-H", "--resample-freq", default="1s", help="Resampling frequency")
-    anomaly_parser.add_argument("-s", "--min-size", type=int, default=10, help="Minimum data points")
+    anomaly_parser.add_argument("-H", "--resample-freq", help="Resampling frequency")
+    anomaly_parser.add_argument("-s", "--min-size", type=int, help="Minimum data points")
     anomaly_parser.set_defaults(func=detect_anomalies)
     
     # memory-leak command
