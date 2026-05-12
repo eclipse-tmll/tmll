@@ -13,7 +13,7 @@ import sys
 
 class Logger:
     logger.remove()
-    logger.add(sys.stdout, colorize=True, format="{message}")
+    logger.add(sys.stderr, colorize=True, format="{message}")
 
     def __init__(self, name: str, verbose: bool = True) -> None:
         self.name = name
