@@ -351,5 +351,39 @@ def xy_anomalies_ui() -> str:
     return _build_html(_last_xy_payload or None)
 
 
+@mcp.resource("experiment://{experiment_id}", name="experiment", description="An open trace experiment")
+def get_experiment_resource(experiment_id: str) -> str:
+    """Return details for a specific experiment."""
+    return run_cli("list")
+
+
+# Override list_resources to dynamically expose each open experiment as a resource.
+_original_list_resources = mcp.list_resources
+
+
+async def _dynamic_list_resources():
+    from mcp.types import Resource as MCPResource
+
+    resources = await _original_list_resources()
+    try:
+        output = run_cli("list")
+        for line in output.splitlines():
+            line = line.strip()
+            if not line or " - " not in line:
+                continue
+            name, exp_id = line.rsplit(" - ", 1)
+            resources.append(MCPResource(
+                uri=f"experiment://{exp_id}",
+                name=name,
+                description=f"Trace experiment: {name}",
+                mimeType="application/json",
+            ))
+    except Exception:
+        pass
+    return resources
+
+mcp.list_resources = _dynamic_list_resources
+
+
 if __name__ == "__main__":
     mcp.run()
