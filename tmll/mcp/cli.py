@@ -251,6 +251,78 @@ def list_experiments(args):
         print(f"{exp.name} - {exp.UUID}")
 
 
+def create_field_plots(args):
+    """Generate XML analysis for field plots and post it to the trace server."""
+    import tempfile
+    import os
+
+    client = TMLLClient(args.host, args.port, verbose=args.verbose)
+
+    # Parse the series spec: JSON dict of {series_name: [[event, field], ...]}
+    series_spec = json.loads(args.series)
+
+    # Build XML: state provider stores fields under series_name/*,
+    # xyView uses entry path="series_name/*" to plot all fields in that series.
+    analysis_id = f"org.eclipse.tracecompass.tmll.field.{args.analysis_name}"
+    handlers = []
+    xy_views = []
+
+    for series_name, event_fields in series_spec.items():
+        for event_name, field_name in event_fields:
+            handlers.append(
+                f'    <eventHandler eventName="{event_name}">\n'
+                f'      <stateChange>\n'
+                f'        <stateAttribute type="constant" value="{series_name}"/>\n'
+                f'        <stateAttribute type="constant" value="{event_name}.{field_name}"/>\n'
+                f'        <stateValue type="eventField" value="{field_name}"/>\n'
+                f'      </stateChange>\n'
+                f'    </eventHandler>'
+            )
+        xy_views.append(
+            f'  <xyView id="{analysis_id}.{series_name}.xy">\n'
+            f'    <head>\n'
+            f'      <analysis id="{analysis_id}"/>\n'
+            f'      <label value="{series_name}"/>\n'
+            f'    </head>\n'
+            f'    <entry path="{series_name}/*">\n'
+            f'      <display type="self"/>\n'
+            f'    </entry>\n'
+            f'  </xyView>'
+        )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<tmfxml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+        '    xsi:noNamespaceSchemaLocation="xmlDefinition.xsd">\n'
+        f'  <stateProvider id="{analysis_id}" version="1">\n'
+        f'    <head>\n'
+        f'      <label value="{args.analysis_name}"/>\n'
+        f'    </head>\n'
+        + '\n'.join(handlers) + '\n'
+        f'  </stateProvider>\n'
+        + '\n'.join(xy_views) + '\n'
+        '</tmfxml>\n'
+    )
+
+    # Write to file and post (delete first for idempotency)
+    xml_path = os.path.join(tempfile.gettempdir(), f"{args.analysis_name}.xml")
+    with open(xml_path, 'w') as f:
+        f.write(xml)
+
+    config_type = 'org.eclipse.tracecompass.tmf.core.config.xmlsourcetype'
+    config_id = f"{args.analysis_name}.xml"
+    client.tsp_client.delete_configuration(config_type, config_id)
+
+    response = client.tsp_client.post_configuration(config_type, {'path': xml_path})
+
+    if response.status_code == 200:
+        print(f"Posted analysis '{args.analysis_name}' (file: {xml_path})")
+        print(f"Analysis ID: {analysis_id}")
+        print(f"XY View ID: {analysis_id}.xy")
+    else:
+        print(f"Failed to post analysis: {response.status_code} {response.status_text}")
+
+
 def delete_experiment(args):
     """Delete an experiment"""
     client = TMLLClient(args.host, args.port, verbose=args.verbose)
@@ -291,6 +363,12 @@ def main():
     fetch_parser.add_argument("-o", "--output", help="Output file prefix")
     fetch_parser.set_defaults(func=fetch_data_cmd)
     
+    # create-field-plots command
+    field_plots_parser = subparsers.add_parser("create-field-plots", help="Generate and post XML analysis for field plots")
+    field_plots_parser.add_argument("analysis_name", help="Unique name for the analysis")
+    field_plots_parser.add_argument("series", help='JSON: {"series_name": [["event", "field"], ...], ...}')
+    field_plots_parser.set_defaults(func=create_field_plots)
+
     # delete command
     delete_parser = subparsers.add_parser("delete", help="Delete an experiment")
     delete_parser.add_argument("experiment", help="Experiment UUID")
