@@ -359,8 +359,6 @@ def get_experiment_resource(experiment_id: str) -> str:
             return json.dumps({"name": name, "uuid": uid})
     return json.dumps({"error": f"Experiment {experiment_id} not found"})
 
-
-
 # Override list_resources to dynamically expose each open experiment as a resource.
 _original_list_resources = mcp.list_resources
 
@@ -394,6 +392,20 @@ async def _dynamic_list_resources():
 # We must re-register on the underlying server to actually override the handler.
 mcp.list_resources = _dynamic_list_resources
 mcp._mcp_server.list_resources()(_dynamic_list_resources)
+
+
+@mcp.tool()
+def create_field_plots(analysis_name: str, series: dict[str, list[list[str]]], host: Optional[str] = None, port: Optional[int] = None) -> str:
+    """Generate an XML analysis to plot event fields and post it to the trace server.
+    
+    Args:
+        analysis_name: Unique name for the analysis
+        series: Dict mapping series names to lists of [event_name, field_name] pairs.
+                Example: {"cpu_prio": [["sched_switch", "prev_prio"]], "mem": [["kmem_alloc", "bytes_alloc"]]}
+    """
+    import json as _json
+    series_json = _json.dumps(series)
+    return run_cli(*_global_args(host, port), "create-field-plots", analysis_name, series_json)
 
 
 if __name__ == "__main__":
