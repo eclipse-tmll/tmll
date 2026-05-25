@@ -354,35 +354,46 @@ def xy_anomalies_ui() -> str:
 @mcp.resource("experiment://{experiment_id}", name="experiment", description="An open trace experiment")
 def get_experiment_resource(experiment_id: str) -> str:
     """Return details for a specific experiment."""
-    return run_cli("list")
+    for name, uid in _fetch_experiments_fast():
+        if uid == experiment_id:
+            return json.dumps({"name": name, "uuid": uid})
+    return json.dumps({"error": f"Experiment {experiment_id} not found"})
+
 
 
 # Override list_resources to dynamically expose each open experiment as a resource.
 _original_list_resources = mcp.list_resources
 
 
+def _fetch_experiments_fast(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> list[tuple[str, str]]:
+    """Fetch experiments directly via HTTP (avoids slow subprocess spawn)."""
+    try:
+        url = f"http://{host}:{port}/tsp/api/experiments"
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            data = json.loads(resp.read())
+        return [(exp["name"], exp["UUID"]) for exp in data if "name" in exp and "UUID" in exp]
+    except Exception:
+        return []
+
+
 async def _dynamic_list_resources():
     from mcp.types import Resource as MCPResource
 
     resources = await _original_list_resources()
-    try:
-        output = run_cli("list")
-        for line in output.splitlines():
-            line = line.strip()
-            if not line or " - " not in line:
-                continue
-            name, exp_id = line.rsplit(" - ", 1)
-            resources.append(MCPResource(
-                uri=f"experiment://{exp_id}",
-                name=name,
-                description=f"Trace experiment: {name}",
-                mimeType="application/json",
-            ))
-    except Exception:
-        pass
+    for name, exp_id in _fetch_experiments_fast():
+        resources.append(MCPResource(
+            uri=f"experiment://{exp_id}",
+            name=name,
+            description=f"Trace experiment: {name}",
+            mimeType="application/json",
+        ))
     return resources
 
+# Monkey-patching the attribute alone doesn't work because FastMCP registers
+# the handler reference at construction time via self._mcp_server.list_resources().
+# We must re-register on the underlying server to actually override the handler.
 mcp.list_resources = _dynamic_list_resources
+mcp._mcp_server.list_resources()(_dynamic_list_resources)
 
 
 if __name__ == "__main__":
