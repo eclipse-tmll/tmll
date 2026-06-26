@@ -152,31 +152,31 @@ TMLL includes a command-line interface for running analyses without writing code
 
 ```bash
 # Create an experiment
-tmll_cli.py create --traces /path/to/trace1 /path/to/trace2 --name "My Experiment"
+python3 -m tmll.mcp.cli create /path/to/trace1 /path/to/trace2 --name "My Experiment"
 
 # List outputs for an experiment
-tmll_cli.py list-outputs --experiment <UUID>
+python3 -m tmll.mcp.cli list-outputs <UUID>
 
 # Fetch data from outputs
-tmll_cli.py fetch-data --experiment <UUID> --keywords "cpu usage"
+python3 -m tmll.mcp.cli fetch-data <UUID> --keywords "cpu usage"
 
 # Run anomaly detection
-tmll_cli.py detect-anomalies --experiment <UUID> --keywords "cpu usage" --method iforest
+python3 -m tmll.mcp.cli anomaly <UUID> --keywords "cpu usage" --method iforest
 
 # Detect memory leaks
-tmll_cli.py detect-memory-leak --experiment <UUID>
+python3 -m tmll.mcp.cli memory-leak <UUID>
 
 # Detect change points
-tmll_cli.py detect-changepoints --experiment <UUID> --method pelt
+python3 -m tmll.mcp.cli changepoint <UUID> --methods single
 
 # Analyze correlations
-tmll_cli.py analyze-correlation --experiment <UUID> --method pearson
+python3 -m tmll.mcp.cli correlation <UUID> --method pearson
 
 # Detect idle resources
-tmll_cli.py detect-idle --experiment <UUID> --threshold 5
+python3 -m tmll.mcp.cli idle-resources <UUID> --cpu-idle-threshold 5
 
 # Run capacity planning
-tmll_cli.py plan-capacity --experiment <UUID> --horizon 30
+python3 -m tmll.mcp.cli capacity <UUID> --horizon 30
 ```
 
 ### Options
@@ -184,6 +184,7 @@ tmll_cli.py plan-capacity --experiment <UUID> --horizon 30
 - `--host`: Trace Server host (default: localhost)
 - `--port`: Trace Server port (default: 8080)
 - `--verbose`: Enable verbose output
+- `--log-stderr`: Send logs to stderr instead of stdout
 
 ## Prerequisites
 
