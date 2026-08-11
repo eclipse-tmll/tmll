@@ -9,7 +9,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server import MCPServer
+from mcp.server.mcpserver import Image
 from mcp.types import ToolAnnotations
 
 # Prevent stray print() calls from corrupting the MCP stdio JSON transport.
@@ -29,7 +30,7 @@ class _StderrWithBuffer:
 
 sys.stdout = _StderrWithBuffer()
 
-mcp = FastMCP("tmll-cli-mcp-server")
+mcp = MCPServer("tmll-cli-mcp-server")
 
 _last_xy_payload: dict = {}
 
@@ -360,6 +361,8 @@ def get_experiment_resource(experiment_id: str) -> str:
     return json.dumps({"error": f"Experiment {experiment_id} not found"})
 
 # Override list_resources to dynamically expose each open experiment as a resource.
+# In mcp 2.0.0, MCPServer.list_resources() is a regular async method called by
+# _handle_list_resources. We simply bind a replacement on the instance.
 _original_list_resources = mcp.list_resources
 
 
@@ -387,11 +390,7 @@ async def _dynamic_list_resources():
         ))
     return resources
 
-# Monkey-patching the attribute alone doesn't work because FastMCP registers
-# the handler reference at construction time via self._mcp_server.list_resources().
-# We must re-register on the underlying server to actually override the handler.
 mcp.list_resources = _dynamic_list_resources
-mcp._mcp_server.list_resources()(_dynamic_list_resources)
 
 
 @mcp.tool()
