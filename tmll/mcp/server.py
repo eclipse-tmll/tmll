@@ -351,13 +351,26 @@ def xy_anomalies_ui() -> str:
     return _build_html(_last_xy_payload or None)
 
 
+def _resolve_experiment(experiment_id: str) -> dict:
+    """Resolve an experiment UUID to its record, or raise if it does not exist.
+
+    A miss is a failure, not data: like run_cli (which raises RuntimeError on a
+    non-zero CLI exit), this raises so the framework emits a JSON-RPC error
+    instead of a successful result carrying an in-band {"error": ...} body that
+    a client cannot distinguish from a real experiment.
+    """
+    for name, uid in _fetch_experiments_fast():
+        if uid == experiment_id:
+            return {"name": name, "uuid": uid}
+    from mcp.shared.exceptions import McpError
+    from mcp.types import ErrorData, INVALID_PARAMS
+    raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Experiment {experiment_id} not found"))
+
+
 @mcp.resource("experiment://{experiment_id}", name="experiment", description="An open trace experiment")
 def get_experiment_resource(experiment_id: str) -> str:
     """Return details for a specific experiment."""
-    for name, uid in _fetch_experiments_fast():
-        if uid == experiment_id:
-            return json.dumps({"name": name, "uuid": uid})
-    return json.dumps({"error": f"Experiment {experiment_id} not found"})
+    return json.dumps(_resolve_experiment(experiment_id))
 
 # Override list_resources to dynamically expose each open experiment as a resource.
 _original_list_resources = mcp.list_resources
@@ -392,6 +405,27 @@ async def _dynamic_list_resources():
 # We must re-register on the underlying server to actually override the handler.
 mcp.list_resources = _dynamic_list_resources
 mcp._mcp_server.list_resources()(_dynamic_list_resources)
+
+# Override read_resource for the same reason list_resources is overridden above:
+# the handler reference is bound at construction time. A missing experiment MUST
+# surface as JSON-RPC -32602, but FastMCP reads templated resources
+# (experiment://{id}) through create_resource, which wraps ANY raise from the
+# handler into a generic ValueError, collapsing the error code to 0. We therefore
+# validate the id here and, only on a miss, raise McpError so it reaches the
+# client intact; the actual read (and every other URI) is delegated unchanged to
+# the original handler.
+_original_read_resource = mcp.read_resource
+
+
+async def _dynamic_read_resource(uri):
+    uri_str = str(uri)
+    prefix = "experiment://"
+    if uri_str.startswith(prefix):
+        _resolve_experiment(uri_str[len(prefix):])  # raises McpError(-32602) on a miss
+    return await _original_read_resource(uri)
+
+mcp.read_resource = _dynamic_read_resource
+mcp._mcp_server.read_resource()(_dynamic_read_resource)
 
 
 @mcp.tool()
