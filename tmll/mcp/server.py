@@ -8,24 +8,33 @@ import sys
 import urllib.request
 from pathlib import Path
 from typing import Optional
+import matplotlib.patches as mpatches
 
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.types import ToolAnnotations
+
 
 # Prevent stray print() calls from corrupting the MCP stdio JSON transport.
 # MCP's stdio_server reads sys.stdout.buffer, so we must preserve it.
 # We replace sys.stdout with a wrapper that redirects text writes to stderr
 # but keeps the original .buffer attribute for MCP's binary I/O.
+
+
 class _StderrWithBuffer:
     """Text writes go to stderr; .buffer stays as real stdout for MCP."""
+
     def __init__(self):
         self.buffer = sys.__stdout__.buffer
+
     def write(self, s):
         return sys.__stderr__.write(s)
+
     def flush(self):
         sys.__stderr__.flush()
+
     def __getattr__(self, name):
         return getattr(sys.__stderr__, name)
+
 
 sys.stdout = _StderrWithBuffer()
 
@@ -33,7 +42,8 @@ mcp = FastMCP("tmll-cli-mcp-server")
 
 _last_xy_payload: dict = {}
 
-CLI_PATH = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parent / "cli.py")
+CLI_PATH = sys.argv[1] if len(sys.argv) > 1 else str(
+    Path(__file__).resolve().parent / "cli.py")
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
 DEFAULT_HOST = "localhost"
@@ -58,7 +68,8 @@ def _protect_stdout():
 def _server_is_running(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
     """Check if the trace server is reachable."""
     try:
-        urllib.request.urlopen(f"http://{host}:{port}/tsp/api/health", timeout=3)
+        urllib.request.urlopen(
+            f"http://{host}:{port}/tsp/api/health", timeout=3)
         return True
     except Exception:
         return False
@@ -90,7 +101,8 @@ def run_cli(*args: str) -> str:
         capture_output=True, text=True, timeout=120
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr or f"CLI exited with code {result.returncode}")
+        raise RuntimeError(
+            result.stderr or f"CLI exited with code {result.returncode}")
     return result.stdout.strip()
 
 
@@ -145,8 +157,22 @@ def list_outputs(experiment_id: str, keywords: Optional[list[str]] = None) -> st
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def fetch_data(experiment_id: str, keywords: Optional[list[str]] = None, output_file: Optional[str] = None) -> str:
     """Fetch data from experiment outputs."""
-    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "output_file": ("-o", output_file)})
+    args = build_args({"keywords": (
+        "-k", keywords or ["cpu usage"]), "output_file": ("-o", output_file)})
     return run_cli("fetch-data", experiment_id, *args)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def fetch_timeline(experiment_id: str, keywords: Optional[list[str]] = None, start: Optional[int] = None, end: Optional[int] = None, entries: Optional[list[int]] = None, output: Optional[str] = None) -> str:
+    """Fetch timeline (states and arrows) from time graph experiment outputs."""
+    args = build_args({
+        "keywords": ("-k", keywords),
+        "start": ("--start", start),
+        "end": ("--end", end),
+        "entries": ("--entries", entries),
+        "output": ("--output", output)
+    })
+    return run_cli("timeline", experiment_id, *args)
 
 
 @mcp.tool()
@@ -158,7 +184,8 @@ def delete_experiment(experiment_id: str) -> str:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def detect_anomalies(experiment_id: str, keywords: Optional[list[str]] = None, method: Optional[str] = None, resample_freq: Optional[str] = None) -> str:
     """Detect anomalies in trace data using ML methods (iforest, zscore, iqr, moving_average, seasonality, frequency_domain, combined)."""
-    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "method": ("-m", method or "iforest"), "resample_freq": ("-H", resample_freq)})
+    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "method": (
+        "-m", method or "iforest"), "resample_freq": ("-H", resample_freq)})
     return run_cli("anomaly", experiment_id, *args)
 
 
@@ -172,14 +199,16 @@ def detect_memory_leak(experiment_id: str, keywords: Optional[list[str]] = None)
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def detect_changepoints(experiment_id: str, keywords: Optional[list[str]] = None, methods: Optional[list[str]] = None) -> str:
     """Detect change points in performance trends (single, zscore, voting, pca)."""
-    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "methods": ("-m", methods or ["single", "zscore", "voting", "pca"])})
+    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "methods": (
+        "-m", methods or ["single", "zscore", "voting", "pca"])})
     return run_cli("changepoint", experiment_id, *args)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def analyze_correlation(experiment_id: str, keywords: Optional[list[str]] = None, method: Optional[str] = None) -> str:
     """Analyze correlation between outputs for root cause analysis (pearson, kendall, spearman)."""
-    args = build_args({"keywords": ("-k", keywords or ["cpu", "memory"]), "method": ("-m", method or "pearson")})
+    args = build_args({"keywords": (
+        "-k", keywords or ["cpu", "memory"]), "method": ("-m", method or "pearson")})
     return run_cli("correlation", experiment_id, *args)
 
 
@@ -201,8 +230,93 @@ def detect_idle_resources(experiment_id: str, keywords: Optional[list[str]] = No
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def plan_capacity(experiment_id: str, keywords: Optional[list[str]] = None, horizon: Optional[int] = None) -> str:
     """Perform capacity planning with predictive models."""
-    args = build_args({"keywords": ("-k", keywords or ["cpu usage"]), "horizon": ("-H", horizon or 100)})
+    args = build_args({"keywords": (
+        "-k", keywords or ["cpu usage"]), "horizon": ("-H", horizon or 100)})
     return run_cli("capacity", experiment_id, *args)
+
+
+COLOR_PALETTE = ["green", "red", "blue", "orange", "purple", "gray"]
+BAR_HEIGHT = 9
+
+
+def states_to_bars(states):
+    return [(state["start_time"], state["end_time"] - state["start_time"]) for state in states]
+
+
+def group_states_by_entry(states):
+    grouped = {}
+    for state in states:
+        entry = state["entry_name"]
+        if entry not in grouped:
+            grouped[entry] = []
+        grouped[entry].append(state)
+    return grouped
+
+
+def get_label_colors(states):
+    label_colors = {}
+    for state in states:
+        label = state["label"]
+        if label not in label_colors:
+            label_colors[label] = COLOR_PALETTE[len(
+                label_colors) % len(COLOR_PALETTE)]
+    return label_colors
+
+
+def _render_gantt_png(states) -> "Image":
+    """Render Gantt-style states into a PNG image."""
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    label_colors = get_label_colors(states)
+    grouped = group_states_by_entry(states)
+
+    fig, ax = plt.subplots(
+        figsize=(12, max(4, len(group_states_by_entry(states)) * 0.5)))
+    yticks = []
+    ylabels = []
+    ax.set_title("TMLL Timeline — Gantt Chart")
+    ax.set_xlabel("Time (ns)")
+    for i, (entry_name, entry_states) in enumerate(grouped.items()):
+        bars = states_to_bars(entry_states)
+        colors = [label_colors[state["label"]] for state in entry_states]
+        y_pos = i * 10
+        ax.broken_barh(bars, (y_pos, BAR_HEIGHT), facecolors=colors)
+        yticks.append(y_pos + BAR_HEIGHT / 2)
+        ylabels.append(entry_name)
+
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(ylabels)
+
+    handles = [mpatches.Patch(color=color, label=label)
+               for label, color in label_colors.items()]
+    ax.legend(handles=handles, loc="upper right")
+    ax.set_ylim(-1, len(grouped) * 10)
+    buf = io.BytesIO()
+    fig.tight_layout()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    return Image(data=buf.getvalue(), format="png")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def plot_timeline(experiment_id: str, keywords: Optional[list[str]] = None,
+                  start: Optional[int] = None, end: Optional[int] = None,
+                  entries: Optional[list[int]] = None) -> "Image":
+    """Render a Gantt-style PNG chart from time graph states. Best used with a narrow time range."""
+    args = build_args({
+        "keywords": ("-k", keywords),
+        "start": ("--start", start),
+        "end": ("--end", end),
+        "entries": ("--entries", entries),
+    })
+    result = run_cli("timeline", experiment_id, *args)
+    data = json.loads(result)
+    output_data = list(data.values())[0]
+    states = output_data["states"]
+    return _render_gantt_png(states)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False), meta={"ui": {"resourceUri": XY_UI_URI}})
@@ -253,7 +367,8 @@ def plot_xy_with_anomalies(
 
         experiment = Experiment.from_tsp_experiment(resp.model)
         experiment.assign_outputs(client._fetch_outputs(experiment))
-        outputs = experiment.find_outputs(keyword=keywords or ["cpu usage"], type=["xy"])
+        outputs = experiment.find_outputs(
+            keyword=keywords or ["cpu usage"], type=["xy"])
         if not outputs:
             return json.dumps({"error": "No XY outputs match keywords", "series": {}})
 
@@ -267,11 +382,13 @@ def plot_xy_with_anomalies(
         total = 0
         for name, df in ad.dataframes.items():
             anomaly_df = result.anomalies.get(name)
-            periods = [[str(s), str(e)] for s, e in result.anomaly_periods.get(name, [])]
+            periods = [[str(s), str(e)]
+                       for s, e in result.anomaly_periods.get(name, [])]
             ax, ay = [], []
             if anomaly_df is not None and not anomaly_df.empty:
                 mask_cols = anomaly_df.filter(regex="_is_anomaly$")
-                mask = mask_cols.any(axis=1) if not mask_cols.empty else anomaly_df.any(axis=1)
+                mask = mask_cols.any(
+                    axis=1) if not mask_cols.empty else anomaly_df.any(axis=1)
                 for ts in anomaly_df.index[mask]:
                     if ts in df.index:
                         ax.append(str(ts))
@@ -332,7 +449,8 @@ def _render_png(payload: dict) -> "Image":
             ax.scatter(pd.to_datetime(s["anomaly_x"]), s["anomaly_y"],
                        color="red", marker="x", s=40, label="Anomalies", zorder=5)
         for a, b in s.get("periods", []):
-            ax.axvspan(pd.to_datetime(a), pd.to_datetime(b), color="red", alpha=0.15)
+            ax.axvspan(pd.to_datetime(a), pd.to_datetime(
+                b), color="red", alpha=0.15)
         ax.set_title(name)
         ax.set_xlabel("Time")
         ax.set_ylabel("Value")
@@ -358,6 +476,7 @@ def get_experiment_resource(experiment_id: str) -> str:
         if uid == experiment_id:
             return json.dumps({"name": name, "uuid": uid})
     return json.dumps({"error": f"Experiment {experiment_id} not found"})
+
 
 # Override list_resources to dynamically expose each open experiment as a resource.
 _original_list_resources = mcp.list_resources
@@ -397,7 +516,7 @@ mcp._mcp_server.list_resources()(_dynamic_list_resources)
 @mcp.tool()
 def create_field_plots(analysis_name: str, series: dict[str, list[list[str]]], host: Optional[str] = None, port: Optional[int] = None) -> str:
     """Generate an XML analysis to plot event fields and post it to the trace server.
-    
+
     Args:
         analysis_name: Unique name for the analysis
         series: Dict mapping series names to lists of [event_name, field_name] pairs.
