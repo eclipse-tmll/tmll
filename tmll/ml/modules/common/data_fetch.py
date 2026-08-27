@@ -60,7 +60,7 @@ class DataFetcher:
                 for key, value in data[output.id].items():
                     if isinstance(value, pd.DataFrame):
                         dataframe = value
-                        dataframe = dataframe.rename(columns={'y': output.name, 'x': 'timestamp'})
+                        dataframe = dataframe.rename(columns={'y': output.id, 'x': 'timestamp'})
                         if dataframes.get(f"{output.id}${key}", None) is None:
                             dataframes[f"{output.id}${key}"] = dataframe
                         else:
