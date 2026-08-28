@@ -63,7 +63,8 @@ class TMLLClient:
         try:
             self.health_status = self.tsp_client.fetch_health().status_code
             if self.health_status != 200:
-                self.logger.error(f"TSP server is not running properly. Check its health status.")
+                self.logger.error(
+                    f"TSP server is not running properly. Check its health status.")
                 return
         except Exception as e:
             # If the TSP server is not running and the user has not specified to install the TSP server, return
@@ -72,7 +73,8 @@ class TMLLClient:
                     "Failed to connect to the TSP server. Please make sure that the TSP server is running. If you want to install the TSP server, set the 'install_tsp_server' parameter to True.")
                 return
 
-            self.logger.warning("TSP server is not running. Trying to run the TSP server, and if not installed, install it.")
+            self.logger.warning(
+                "TSP server is not running. Trying to run the TSP server, and if not installed, install it.")
 
             tsp_installer = TSPInstaller()
             tsp_installer.install()
@@ -116,16 +118,19 @@ class TMLLClient:
         opened_traces = []
         for trace in traces:
             if "path" not in trace:
-                self.logger.error("The 'path' parameter is required for each trace.")
+                self.logger.error(
+                    "The 'path' parameter is required for each trace.")
                 continue
 
             # If the name is not provided for the trace, generate a name for the trace
             if "name" not in trace:
                 trace["name"] = NameGenerator.generate_name(base=trace["path"])
 
-            response = self.tsp_client.open_trace(name=trace["name"], path=trace["path"])
+            response = self.tsp_client.open_trace(
+                name=trace["name"], path=trace["path"])
             if response.status_code != 200:
-                self.logger.error(f"Failed to open trace '{trace['name']}'. Error: {response.status_text}")
+                self.logger.error(
+                    f"Failed to open trace '{trace['name']}'. Error: {response.status_text}")
                 continue
 
             opened_traces.append(Trace.from_tsp_trace(response.model))
@@ -139,24 +144,30 @@ class TMLLClient:
         # If create_experiment is True, create an experiment with the opened traces
         trace_uuids = [trace.uuid for trace in opened_traces]
 
-        opened_experiment = self.tsp_client.open_experiment(name=experiment_name, traces=trace_uuids)
+        opened_experiment = self.tsp_client.open_experiment(
+            name=experiment_name, traces=trace_uuids)
         if opened_experiment.status_code != 200:
-            self.logger.error(f"Failed to open experiment '{experiment_name}'. Error: {opened_experiment.status_text}")
+            self.logger.error(
+                f"Failed to open experiment '{experiment_name}'. Error: {opened_experiment.status_text}")
             return None
 
         # Check the status of the experiment periodically until it is completed
         # P.S.: It's not an efficient way to check the status. However, the tsp server does not provide a way to get the status of the experiment directly.
-        self.logger.info(f"Checking the indexing status of the experiment '{experiment_name}'.")
+        self.logger.info(
+            f"Checking the indexing status of the experiment '{experiment_name}'.")
         experiment = None
         while (True):
-            status = self.tsp_client.fetch_experiment(opened_experiment.model.UUID)
+            status = self.tsp_client.fetch_experiment(
+                opened_experiment.model.UUID)
             if status.status_code != 200:
-                self.logger.error(f"Failed to fetch experiment. Error: {status.status_text}")
+                self.logger.error(
+                    f"Failed to fetch experiment. Error: {status.status_text}")
                 return None
 
             if status.model.indexing_status.name == IndexingStatus.COMPLETED.name:
                 experiment = Experiment.from_tsp_experiment(status.model)
-                self.logger.info(f"Experiment '{experiment_name}' is loaded completely.")
+                self.logger.info(
+                    f"Experiment '{experiment_name}' is loaded completely.")
                 break
 
             # Wait for 1 second before checking the status again
@@ -179,16 +190,19 @@ class TMLLClient:
         """
 
         if experiment is None:
-            self.logger.error("Experiment is not loaded. Please load the experiment first by calling the 'create_experiment' method.")
+            self.logger.error(
+                "Experiment is not loaded. Please load the experiment first by calling the 'create_experiment' method.")
             return []
 
         # Get the outputs of the experiment
         outputs = self.tsp_client.fetch_experiment_outputs(experiment.uuid)
         if outputs.status_code != 200:
-            self.logger.error(f"Failed to fetch experiment outputs. Error: {outputs.status_text}")
+            self.logger.error(
+                f"Failed to fetch experiment outputs. Error: {outputs.status_text}")
             return []
 
-        fetched_outputs = [Output.from_tsp_output(output) for output in outputs.model.descriptors]
+        fetched_outputs = [Output.from_tsp_output(
+            output) for output in outputs.model.descriptors]
         self.logger.info("Outputs are fetched successfully.")
 
         return fetched_outputs
@@ -206,7 +220,8 @@ class TMLLClient:
         """
 
         if experiment is None:
-            self.logger.error("Experiment is not loaded. Please load the experiment first by calling the 'create_experiment' method.")
+            self.logger.error(
+                "Experiment is not loaded. Please load the experiment first by calling the 'create_experiment' method.")
             return None
 
         # Get the outputs of the experiment
@@ -223,27 +238,34 @@ class TMLLClient:
             # Get the trees of the outputs
             match output.type:
                 case "TABLE":
-                    response = self.tsp_client.fetch_virtual_table_columns(exp_uuid=experiment.uuid, output_id=output.id)
+                    response = self.tsp_client.fetch_virtual_table_columns(
+                        exp_uuid=experiment.uuid, output_id=output.id)
                     if response.status_code != 200:
-                        self.logger.error(f"Failed to fetch table columns. Error: {response.status_text}")
+                        self.logger.error(
+                            f"Failed to fetch table columns. Error: {response.status_text}")
                         continue
 
                     columns = response.model.model.columns
-                    tree = Tree([NodeTree(name=col.name, id=col.id, parent_id=-1) for col in columns])
+                    tree = Tree(
+                        [NodeTree(name=col.name, id=col.id, parent_id=-1) for col in columns])
                     fetched_outputs.append({
                         "output": output,
                         "tree": tree
                     })
-                    self.logger.info(f"Output '{output.name}' and its tree fetched successfully.")
+                    self.logger.info(
+                        f"Output '{output.name}' and its tree fetched successfully.")
                     continue
 
                 case "DATA_TREE":
                     while True:
-                        response = self.tsp_client.fetch_datatree(exp_uuid=experiment.uuid, output_id=output.id)
+                        response = self.tsp_client.fetch_datatree(
+                            exp_uuid=experiment.uuid, output_id=output.id)
                         if response.status_code != 200:
-                            response = self.tsp_client.fetch_timegraph_tree(exp_uuid=experiment.uuid, output_id=output.id)
+                            response = self.tsp_client.fetch_timegraph_tree(
+                                exp_uuid=experiment.uuid, output_id=output.id)
                             if response.status_code != 200:
-                                self.logger.error(f"Failed to fetch data tree. Error: {response.status_text}")
+                                self.logger.error(
+                                    f"Failed to fetch data tree. Error: {response.status_text}")
                                 break
 
                         # Wait until the model is completely fetched (i.e., status is COMPLETED)
@@ -254,9 +276,11 @@ class TMLLClient:
 
                 case "TIME_GRAPH":
                     while True:
-                        response = self.tsp_client.fetch_timegraph_tree(exp_uuid=experiment.uuid, output_id=output.id)
+                        response = self.tsp_client.fetch_timegraph_tree(
+                            exp_uuid=experiment.uuid, output_id=output.id)
                         if response.status_code != 200:
-                            self.logger.error(f"Failed to fetch time graph tree. Error: {response.status_text}")
+                            self.logger.error(
+                                f"Failed to fetch time graph tree. Error: {response.status_text}")
                             break
 
                         # Wait until the model is completely fetched (i.e., status is COMPLETED)
@@ -267,9 +291,11 @@ class TMLLClient:
 
                 case "TREE_TIME_XY":
                     while True:
-                        response = self.tsp_client.fetch_xy_tree(exp_uuid=experiment.uuid, output_id=output.id)
+                        response = self.tsp_client.fetch_xy_tree(
+                            exp_uuid=experiment.uuid, output_id=output.id)
                         if response.status_code != 200:
-                            self.logger.error(f"Failed to fetch XY tree. Error: {response.status_text}")
+                            self.logger.error(
+                                f"Failed to fetch XY tree. Error: {response.status_text}")
                             break
 
                         # Wait until the model is completely fetched (i.e., status is COMPLETED)
@@ -278,16 +304,19 @@ class TMLLClient:
 
                         time.sleep(1)
                 case _:
-                    self.logger.warning(f"Output type '{output.type}' is not supported.")
+                    self.logger.warning(
+                        f"Output type '{output.type}' is not supported.")
                     continue
 
             if response.model is None:
-                self.logger.warning(f"Tree of the output '{output.name}' is None.")
+                self.logger.warning(
+                    f"Tree of the output '{output.name}' is None.")
                 continue
 
             model = response.model.model
             if model is None:
-                self.logger.warning(f"Tree of the output '{output.name}' is None.")
+                self.logger.warning(
+                    f"Tree of the output '{output.name}' is None.")
                 continue
 
             tree = Tree.from_tsp_tree(model)
@@ -296,7 +325,8 @@ class TMLLClient:
                 "output": output,
                 "tree": tree
             })
-            self.logger.info(f"Output '{output.name}' and its tree fetched successfully.")
+            self.logger.info(
+                f"Output '{output.name}' and its tree fetched successfully.")
 
         self.logger.info("Outputs are fetched successfully.")
 
@@ -320,12 +350,14 @@ class TMLLClient:
 
         # Check if the experiment is loaded
         if experiment is None:
-            self.logger.error("Experiment is not loaded. Please load the experiment first.")
+            self.logger.error(
+                "Experiment is not loaded. Please load the experiment first.")
             return None
 
         # Check if the outputs are fetched
         if not outputs:
-            self.logger.error("Outputs are not fetched. Please fetch the outputs first.")
+            self.logger.error(
+                "Outputs are not fetched. Please fetch the outputs first.")
             return None
 
         datasets = {}
@@ -341,12 +373,14 @@ class TMLLClient:
             match o_output.type:
                 case "TREE_TIME_XY":
                     # Prepare the parameters for the TSP server
-                    item_ids = list(map(int, [node.id for node in o_tree.nodes]))
+                    item_ids = list(
+                        map(int, [node.id for node in o_tree.nodes]))
                     time_range_start = kwargs.get("start", experiment.start)
                     time_range_end = kwargs.get("end", experiment.end)
                     resample_freq = kwargs.get("resample_freq", "1s")
 
-                    intervals = self._calculate_intervals(time_range_start, time_range_end, resample_freq)
+                    intervals = self._calculate_intervals(
+                        time_range_start, time_range_end, resample_freq)
 
                     for interval in intervals:
                         parameters = {
@@ -361,9 +395,11 @@ class TMLLClient:
                         }
 
                         # Send a request to the TSP server to fetch the XY data
-                        data = self.tsp_client.fetch_xy(exp_uuid=experiment.uuid, output_id=o_output.id, parameters=parameters)
+                        data = self.tsp_client.fetch_xy(
+                            exp_uuid=experiment.uuid, output_id=o_output.id, parameters=parameters)
                         if data.status_code != 200 or data.model.model is None:
-                            self.logger.error(f"Failed to fetch XY data. Error: {data.status_text}")
+                            self.logger.error(
+                                f"Failed to fetch XY data. Error: {data.status_text}")
                             break  # Exit the loop if there's an error
 
                         if not data.model.model.series:
@@ -375,14 +411,17 @@ class TMLLClient:
                             x, y = serie.x_values, serie.y_values
 
                             # Create a pandas DataFrame from the data
-                            dataset = pd.DataFrame(data=np.c_[x, y], columns=["x", "y"])
+                            dataset = pd.DataFrame(
+                                data=np.c_[x, y], columns=["x", "y"])
 
                             # Get the series name
-                            series_name = Tree.get_node_by_id(o_tree, serie.series_id)
+                            series_name = Tree.get_node_by_id(
+                                o_tree, serie.series_id)
                             if series_name:
                                 prefix = series_name.name
                                 while True:
-                                    parent_node = o_tree.get_node_parent(series_name.id)
+                                    parent_node = o_tree.get_node_parent(
+                                        series_name.id)
                                     if parent_node:
                                         prefix = f"{parent_node.name}->{prefix}"
                                         series_name = parent_node
@@ -393,8 +432,10 @@ class TMLLClient:
                                 series_name = serie.series_name
 
                             # Add the dataset to the datasets dictionary
-                            datasets[o_output.id] = datasets.get(o_output.id, {})
-                            datasets[o_output.id][series_name] = pd.concat([datasets[o_output.id].get(series_name, pd.DataFrame()), dataset])
+                            datasets[o_output.id] = datasets.get(
+                                o_output.id, {})
+                            datasets[o_output.id][series_name] = pd.concat(
+                                [datasets[o_output.id].get(series_name, pd.DataFrame()), dataset])
 
                 case "TIME_GRAPH":
                     items = list(map(int, [node.id for node in o_tree.nodes]))
@@ -403,7 +444,8 @@ class TMLLClient:
                     resample_freq = kwargs.get("resample_freq", "1s")
                     strategy = kwargs.get("strategy", "DEEP")
 
-                    intervals = self._calculate_intervals(time_range_start, time_range_end, resample_freq)
+                    intervals = self._calculate_intervals(
+                        time_range_start, time_range_end, resample_freq)
 
                     for interval in intervals:
                         parameters = {
@@ -421,23 +463,27 @@ class TMLLClient:
                         }
 
                         # Send a request to the TSP server to fetch the time graph data
-                        data = self.tsp_client.fetch_timegraph_states(exp_uuid=experiment.uuid, output_id=o_output.id, parameters=parameters)
+                        data = self.tsp_client.fetch_timegraph_states(
+                            exp_uuid=experiment.uuid, output_id=o_output.id, parameters=parameters)
                         if data.status_code != 200 or data.model.model is None:
-                            self.logger.error(f"Failed to fetch time graph data. Error: {data.status_text}")
+                            self.logger.error(
+                                f"Failed to fetch time graph data. Error: {data.status_text}")
                             break
 
                         # Check if the time graph data is empty
                         if not data.model.model.rows:
                             break
 
-                        timegraph = TimeGraph.from_tsp_time_graph(data.model.model)
+                        timegraph = TimeGraph.from_tsp_time_graph(
+                            data.model.model)
 
                         # Create a pandas DataFrame from the time graph data
                         data = []
                         for row in timegraph.rows:
                             for state in row.states:
                                 node = o_tree.get_node_by_id(row.entry_id)
-                                parent_node = o_tree.get_node_parent(row.entry_id)
+                                parent_node = o_tree.get_node_parent(
+                                    row.entry_id)
                                 parent_id = parent_node.id if parent_node else row.entry_id
                                 data.append({
                                     "entry_id": row.entry_id,
@@ -445,7 +491,9 @@ class TMLLClient:
                                     "parent_id": parent_id,
                                     "start_time": state.start,
                                     "end_time": state.end,
-                                    "label": state.label
+                                    "label": state.label,
+                                    "style": state.style,
+                                    "value": state.value
                                 })
 
                         dataset = pd.DataFrame(data)
@@ -454,27 +502,37 @@ class TMLLClient:
                         if o_output.id not in datasets:
                             datasets[o_output.id] = pd.DataFrame()
 
-                        datasets[o_output.id] = pd.concat([datasets[o_output.id], dataset])
+                        datasets[o_output.id] = pd.concat(
+                            [datasets[o_output.id], dataset])
 
                 case "TABLE" | "DATA_TREE":
-                    columns = self.tsp_client.fetch_virtual_table_columns(exp_uuid=experiment.uuid, output_id=o_output.id)
+                    columns = self.tsp_client.fetch_virtual_table_columns(
+                        exp_uuid=experiment.uuid, output_id=o_output.id)
                     if columns.status_code != 200:
-                        self.logger.error(f"Failed to fetch '{o_output.name}' virtual table columns. Error: {columns.status_text}")
+                        self.logger.error(
+                            f"Failed to fetch '{o_output.name}' virtual table columns. Error: {columns.status_text}")
                         continue
 
-                    columns = [TableDataColumn.from_tsp_table_column(column) for column in columns.model.model.columns]
+                    columns = [TableDataColumn.from_tsp_table_column(
+                        column) for column in columns.model.model.columns]
 
                     # We keep the initial columns to use them in the DataFrame creation
                     initial_table_columns = []
 
-                    start_index = int(kwargs.get("table_line_start_index", 0))  # Start index of the table data. Default is 0 (i.e., the first row)
-                    line_count = int(kwargs.get("table_line_count", 65536))  # 65536 is the maximum value that the TSP server accepts
-                    column_ids = list(map(int, kwargs.get("table_line_column_ids", [c.id for c in columns])))  # Which columns to fetch from the table
-                    search_direction = kwargs.get("table_line_search_direction", "NEXT")  # Search direction for the table data (i.e., NEXT or PREVIOUS)
+                    # Start index of the table data. Default is 0 (i.e., the first row)
+                    start_index = int(kwargs.get("table_line_start_index", 0))
+                    # 65536 is the maximum value that the TSP server accepts
+                    line_count = int(kwargs.get("table_line_count", 65536))
+                    column_ids = list(map(int, kwargs.get("table_line_column_ids", [
+                                      c.id for c in columns])))  # Which columns to fetch from the table
+                    # Search direction for the table data (i.e., NEXT or PREVIOUS)
+                    search_direction = kwargs.get(
+                        "table_line_search_direction", "NEXT")
 
                     # Convert table_line_column_names into column_ids if it is provided
                     if not column_ids and "table_line_column_names" in kwargs:
-                        column_ids = [int(c.id) for c in columns if c.name.lower() in map(str.lower, kwargs.get("table_line_column_names", []))]
+                        column_ids = [int(c.id) for c in columns if c.name.lower() in map(
+                            str.lower, kwargs.get("table_line_column_names", []))]
 
                     while True:
                         # Prepare the parameters for the TSP server
@@ -493,41 +551,51 @@ class TMLLClient:
 
                         # If the request is not successful or the table data is None, break the loop
                         if table_request.status_code != 200 or table_request.model.model is None:
-                            self.logger.error(f"Failed to fetch '{o_output.name}' virtual table data. Error: {table_request.status_text}")
+                            self.logger.error(
+                                f"Failed to fetch '{o_output.name}' virtual table data. Error: {table_request.status_text}")
                             break
 
                         # Create the table model
-                        table = TableData.from_tsp_table(table_request.model.model)
+                        table = TableData.from_tsp_table(
+                            table_request.model.model)
 
                         # If the DataFrame for the output is not created yet, create it
                         if o_output.id not in datasets:
-                            initial_table_columns = [c.name for c_id in table.columns for c in columns if c.id == c_id]
+                            initial_table_columns = [
+                                c.name for c_id in table.columns for c in columns if c.id == c_id]
                             if not initial_table_columns:
-                                initial_table_columns = [f"Column {c}" for c in table.columns]
+                                initial_table_columns = [
+                                    f"Column {c}" for c in table.columns]
 
-                            datasets[o_output.id] = pd.DataFrame(columns=initial_table_columns)
+                            datasets[o_output.id] = pd.DataFrame(
+                                columns=initial_table_columns)
 
                         # If there are no rows in the table, break the loop since there is no more data to fetch
                         if not table.rows:
                             break
 
                         # Convert the table rows to a DataFrame
-                        row_data = pd.DataFrame([row.values for row in table.rows], columns=initial_table_columns)
+                        row_data = pd.DataFrame(
+                            [row.values for row in table.rows], columns=initial_table_columns)
 
                         # If the "separate_columns" parameter is True, extract the features from the columns
                         # For example, if the column contains "key=value" pairs, extract the key and value as separate columns
-                        separate_columns = kwargs.get("separate_columns", False)
+                        separate_columns = kwargs.get(
+                            "separate_columns", False)
                         if separate_columns:
                             processor = TableProcessor()
-                            row_data = processor.extract_features_from_columns(row_data)
+                            row_data = processor.extract_features_from_columns(
+                                row_data)
 
                         # Concatenate the row data to the DataFrame of the output
-                        datasets[o_output.id] = pd.concat([datasets[o_output.id], row_data], ignore_index=True)
+                        datasets[o_output.id] = pd.concat(
+                            [datasets[o_output.id], row_data], ignore_index=True)
 
                         # Update the start index for the next iteration (i.e., next batch of data)
                         start_index += line_count
                 case _:
-                    self.logger.warning(f"Output type '{o_output.type}' is not supported.")
+                    self.logger.warning(
+                        f"Output type '{o_output.type}' is not supported.")
                     continue
 
             self.logger.info(f"Data fetched for the output '{o_output.name}'.")
@@ -596,7 +664,8 @@ class TMLLClient:
         :param verbose: Flag to enable/disable the verbose mode for LTTng
         :type verbose: bool
         """
-        TMLLInstrumentation.enable(instrumentation_file, instrument_kernel, verbose)
+        TMLLInstrumentation.enable(
+            instrumentation_file, instrument_kernel, verbose)
 
     @staticmethod
     def disable_instrumentation(convert_to_json: bool = False) -> None:
@@ -681,7 +750,8 @@ class TableProcessor:
         extracted_data = {}
 
         for column in dataframe.columns:
-            series = dataframe[column].astype(str).replace('\n', '').str.strip()
+            series = dataframe[column].astype(
+                str).replace('\n', '').str.strip()
 
             sample_rows = series.str.split(', ')
             for row in sample_rows:
@@ -696,7 +766,8 @@ class TableProcessor:
             extracted_data[col] = [np.nan] * len(dataframe)
 
         for column in dataframe.columns:
-            series = dataframe[column].astype(str).replace('\n', '').str.strip()
+            series = dataframe[column].astype(
+                str).replace('\n', '').str.strip()
 
             for idx, row in enumerate(series.str.split(', ')):
                 if not isinstance(row, list):
@@ -712,6 +783,7 @@ class TableProcessor:
 
         columns_to_keep = set(dataframe.columns) - set(result.columns)
         if columns_to_keep:
-            result = pd.concat([dataframe[list(columns_to_keep)], result], axis=1)
+            result = pd.concat(
+                [dataframe[list(columns_to_keep)], result], axis=1)
 
         return result
