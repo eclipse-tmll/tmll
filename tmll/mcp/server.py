@@ -12,6 +12,7 @@ import matplotlib.patches as mpatches
 
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.types import ToolAnnotations
+from tmll.mcp.gantt import build_gantt_figure
 
 
 # Prevent stray print() calls from corrupting the MCP stdio JSON transport.
@@ -235,69 +236,13 @@ def plan_capacity(experiment_id: str, keywords: Optional[list[str]] = None, hori
     return run_cli("capacity", experiment_id, *args)
 
 
-COLOR_PALETTE = ["green", "red", "blue", "orange", "purple", "gray"]
-BAR_HEIGHT = 9
-
-
-def states_to_bars(states):
-    return [(state["start_time"], state["end_time"] - state["start_time"]) for state in states]
-
-
-def group_states_by_entry(states):
-    grouped = {}
-    for state in states:
-        entry = state["entry_name"]
-        if entry not in grouped:
-            grouped[entry] = []
-        grouped[entry].append(state)
-    return grouped
-
-
-def get_label_colors(states):
-    label_colors = {}
-    for state in states:
-        label = state["label"]
-        if label not in label_colors:
-            label_colors[label] = COLOR_PALETTE[len(
-                label_colors) % len(COLOR_PALETTE)]
-    return label_colors
-
-
 def _render_gantt_png(states) -> "Image":
     """Render Gantt-style states into a PNG image."""
     import io
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    label_colors = get_label_colors(states)
-    grouped = group_states_by_entry(states)
-
-    fig, ax = plt.subplots(
-        figsize=(12, max(4, len(group_states_by_entry(states)) * 0.5)))
-    yticks = []
-    ylabels = []
-    ax.set_title("TMLL Timeline — Gantt Chart")
-    ax.set_xlabel("Time (ns)")
-    for i, (entry_name, entry_states) in enumerate(grouped.items()):
-        bars = states_to_bars(entry_states)
-        colors = [label_colors[state["label"]] for state in entry_states]
-        y_pos = i * 10
-        ax.broken_barh(bars, (y_pos, BAR_HEIGHT), facecolors=colors)
-        yticks.append(y_pos + BAR_HEIGHT / 2)
-        ylabels.append(entry_name)
-
-    ax.set_yticks(yticks)
-    ax.set_yticklabels(ylabels)
-
-    handles = [mpatches.Patch(color=color, label=label)
-               for label, color in label_colors.items()]
-    ax.legend(handles=handles, loc="upper right")
-    ax.set_ylim(-1, len(grouped) * 10)
+    fig = build_gantt_figure(states)
     buf = io.BytesIO()
-    fig.tight_layout()
     fig.savefig(buf, format="png", bbox_inches="tight")
-    plt.close(fig)
+    fig.clf()
     return Image(data=buf.getvalue(), format="png")
 
 

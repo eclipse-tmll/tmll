@@ -13,6 +13,7 @@ from tmll.ml.modules.root_cause.correlation_module import CorrelationAnalysis
 from tmll.ml.modules.resource_optimization.idle_resource_detection_module import IdleResourceDetection
 from tmll.ml.modules.predictive_maintenance.capacity_planning_module import CapacityPlanning
 from tmll.common.models.timegraph.timegraph import TimeGraph
+from tmll.mcp.gantt import build_gantt_figure
 
 
 def get_experiment(client, exp_uuid):
@@ -93,75 +94,10 @@ def fetch_data_cmd(args):
         print(json.dumps(serializable_data, indent=2, default=str))
 
 
-COLOR_PALETTE = ["green", "red", "blue", "orange", "purple", "gray"]
-BAR_HEIGHT = 9
-
-
-def states_to_bars(states):
-    return [(state["start_time"], state["end_time"] - state["start_time"]) for state in states]
-
-
-def group_states_by_entry(states):
-    grouped = {}
-    for state in states:
-        entry = state["entry_name"]
-        if entry not in grouped:
-            grouped[entry] = []
-        grouped[entry].append(state)
-    return grouped
-
-
-def get_label_colors(states):
-    label_colors = {}
-    for state in states:
-        label = state["label"]
-        if label is None or (isinstance(label, float) and label != label):
-            label = "(no label)"
-        if label not in label_colors:
-            label_colors[label] = COLOR_PALETTE[len(
-                label_colors) % len(COLOR_PALETTE)]
-    return label_colors
-
-
 def draw_gantt_to_file(states, output_path):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-
-    label_colors = get_label_colors(states)
-    grouped = group_states_by_entry(states)
-
-    fig, ax = plt.subplots(figsize=(12, max(4, len(grouped) * 0.5)))
-    ax.set_title("TMLL Timeline — Gantt Chart")
-    ax.set_xlabel("Time (ns)")
-
-    yticks = []
-    ylabels = []
-    for i, (entry_name, entry_states) in enumerate(grouped.items()):
-        bars = states_to_bars(entry_states)
-        colors = []
-        for state in entry_states:
-            label = state["label"]
-            if label is None or (isinstance(label, float) and label != label):
-                label = "(no label)"
-            colors.append(label_colors[label])
-        y_pos = i * 10
-        ax.broken_barh(bars, (y_pos, BAR_HEIGHT), facecolors=colors)
-        yticks.append(y_pos + BAR_HEIGHT / 2)
-        ylabels.append(entry_name)
-
-    ax.set_yticks(yticks)
-    ax.set_yticklabels(ylabels)
-    ax.set_ylim(-1, len(grouped) * 10)
-
-    handles = [mpatches.Patch(color=color, label=label)
-               for label, color in label_colors.items()]
-    ax.legend(handles=handles, loc="upper right")
-
-    fig.tight_layout()
-    plt.savefig(output_path, bbox_inches="tight")
-    plt.close(fig)
+    fig = build_gantt_figure(states)
+    fig.savefig(output_path, bbox_inches="tight")
+    fig.clf()
 
 
 def fetch_timeline(args):
@@ -239,7 +175,7 @@ def fetch_timeline(args):
     if args.plot:
         for output_id, entry in serializable_data.items():
             draw_gantt_to_file(entry["states"], args.plot)
-            break 
+            break
         print(f"Gantt chart saved to {args.plot}")
 
 
