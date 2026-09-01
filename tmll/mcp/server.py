@@ -12,7 +12,7 @@ import matplotlib.patches as mpatches
 
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.types import ToolAnnotations
-from tmll.mcp.gantt import build_gantt_figure
+from tmll.mcp.ui.gantt import build_gantt_figure
 
 
 # Prevent stray print() calls from corrupting the MCP stdio JSON transport.

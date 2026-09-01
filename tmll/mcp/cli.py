@@ -13,7 +13,7 @@ from tmll.ml.modules.root_cause.correlation_module import CorrelationAnalysis
 from tmll.ml.modules.resource_optimization.idle_resource_detection_module import IdleResourceDetection
 from tmll.ml.modules.predictive_maintenance.capacity_planning_module import CapacityPlanning
 from tmll.common.models.timegraph.timegraph import TimeGraph
-from tmll.mcp.gantt import build_gantt_figure
+from tmll.mcp.ui.gantt import build_gantt_figure
 
 
 def get_experiment(client, exp_uuid):
