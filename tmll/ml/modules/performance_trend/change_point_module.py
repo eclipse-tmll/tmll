@@ -243,7 +243,7 @@ class ChangePointAnalysis(BaseModule):
         - Voting-based analysis: Combines change points from individual metrics using voting (majority voting)
         - PCA analysis: Uses principal component analysis to detect change points (principal component)
 
-        :param metrics: List of metrics to analyze (None for all metrics)
+        :param metrics: Names (or IDs) of the outputs to analyze (None for all metrics)
         :type metrics: Optional[List[str]]
         :param n_change_points: Number of change points to detect
         :type n_change_points: int
@@ -255,7 +255,7 @@ class ChangePointAnalysis(BaseModule):
         :type window_size: int
         :param tune_hyperparameters: Whether to tune hyperparameters for change point detection
         :type tune_hyperparameters: bool
-        :return: Analysis results for each method
+        :return: Analysis results for each method (single metric results are keyed by output ID)
         :rtype: Optional[ChangePointAnalysisResult]
         """
         if self.combined_df is None:
@@ -268,10 +268,13 @@ class ChangePointAnalysis(BaseModule):
         results = ChangePointAnalysisResult(metrics={})
 
         if metrics:
-            outputs = [self.experiment.get_output_by_name(metric) for metric in metrics]
-            metrics_to_analyze = [output.id for output in outputs if output is not None]
+            metric_ids = {metric: self._get_loaded_output_id(metric) for metric in metrics}
+            missing = [metric for metric, metric_id in metric_ids.items() if metric_id is None]
+            if missing:
+                self.logger.warning(f"Metrics not found: {missing}")
+            metrics_to_analyze = list(dict.fromkeys(metric_id for metric_id in metric_ids.values() if metric_id is not None))
             if not metrics_to_analyze:
-                self.logger.warning(f"None of the requested metrics were found: {metrics}")
+                self.logger.warning("None of the requested metrics were found")
                 return None
         else:
             metrics_to_analyze = list(self.dataframes.keys())
@@ -482,7 +485,26 @@ class ChangePointAnalysis(BaseModule):
 
         fig_size = kwargs.get("fig_size", (15, 3))
         fig_dpi = kwargs.get("fig_dpi", 100)
+
+        combined_plots = []
         colors = plt.get_cmap("tab10")
+        for idx, metric in enumerate(self.combined_df.columns):
+            metric_name = self._get_output_name(metric)
+            combined_plots.append({
+                "plot_type": "time_series",
+                "data": pd.DataFrame({metric_name: self.combined_df[metric]}, index=self.combined_df.index),
+                "label": metric_name,
+                "title": metric_name,
+                "y": metric_name,
+                "color": colors(idx % 10),
+                "linewidth": 1.5,
+                "xlabel": "Time",
+                "ylabel": metric_name
+            })
+        self._plot(plots=combined_plots, plot_size=fig_size, dpi=fig_dpi,
+                   fig_title="Time Series of Metrics",
+                   fig_xlabel="Time",
+                   fig_ylabel="Value (normalized)")
 
         def _get_metric_data(metric: str) -> Tuple[str, Optional[pd.Series]]:
             match metric:
@@ -499,15 +521,13 @@ class ChangePointAnalysis(BaseModule):
                         results.metrics[metric].kwargs.get("principal_component", None) if (
                             "pca" in results.metrics and results.metrics["pca"].kwargs is not None) else None
                 case _:
-                    return f"Change Points for {metric}", \
+                    return f"Change Points for {self._get_output_name(metric)}", \
                         self.dataframes[metric].iloc[:, 0] if metric in self.dataframes else None
 
         for idx, (metric, result) in enumerate(results.metrics.items()):
             plots = []
             title, series = _get_metric_data(metric)
-            output = self.experiment.get_output_by_id(metric)
-            metric_name = output.name if output else metric
-            title = title.replace(metric, metric_name)
+            metric_name = self._get_output_name(metric)
 
             # Add individual metric plots
             plots.append({

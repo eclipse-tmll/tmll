@@ -118,14 +118,14 @@ class CorrelationAnalysis(BaseModule):
                 return None
 
             period_data = {
-                id: df[(df.index >= start_time) & (df.index <= end_time)]
-                for id, df in self.dataframes.items()
+                output_id: df[(df.index >= start_time) & (df.index <= end_time)]
+                for output_id, df in self.dataframes.items()
             }
         else:
             period_data = self.dataframes
 
         # Remove dataframes with no data in the period
-        period_data = {id: df for id, df in period_data.items() if not df.empty}
+        period_data = {output_id: df for output_id, df in period_data.items() if not df.empty}
 
         # Calculate all pairwise correlations
         ids = list(period_data.keys())
@@ -167,23 +167,23 @@ class CorrelationAnalysis(BaseModule):
         Accordingly, we may find the optimal lag that maximizes the correlation. This is useful for 
         cases where one series is leading or lagging the other.
 
-        :param series1_name: Name of the first series to compare
+        :param series1_name: Name (or ID) of the first series to compare
         :type series1_name: str
-        :param series2_name: Name of the second series to compare
+        :param series2_name: Name (or ID) of the second series to compare
         :type series2_name: str
         :param max_lag: Maximum lag to consider, defaults to 10
         :type max_lag: int, optional
         :return: Lag analysis results
         :rtype: Optional[LagAnalysisResult]
         """
-        output1 = self.experiment.get_output_by_name(series1_name)
-        output2 = self.experiment.get_output_by_name(series2_name)
-        if output1 is None or output2 is None:
+        series1_id = self._get_loaded_output_id(series1_name)
+        series2_id = self._get_loaded_output_id(series2_name)
+        if series1_id is None or series2_id is None:
             self.logger.warning("Series not found in dataframes.")
             return None
 
-        series1 = self.dataframes[output1.id][output1.id]
-        series2 = self.dataframes[output2.id][output2.id]
+        series1 = self.dataframes[series1_id][series1_id]
+        series2 = self.dataframes[series2_id][series2_id]
 
         lag_results = []
         for lag in range(-max_lag, max_lag + 1):
@@ -209,8 +209,8 @@ class CorrelationAnalysis(BaseModule):
 
         return LagAnalysisResult(lag_analysis=lag_results,
                                  optimal_lag=optimal_lag,
-                                 series1=output1.id,
-                                 series2=output2.id)
+                                 series1=series1_id,
+                                 series2=series2_id)
 
     def plot_correlation_matrix(self, results: Optional[CorrelationAnalysisResult], **kwargs) -> None:
         """Plot correlation matrix heatmap from analysis results.
@@ -237,9 +237,8 @@ class CorrelationAnalysis(BaseModule):
         fig_dpi = kwargs.get("fig_dpi", 100)
 
         correlation_matrix = results.correlations.copy().fillna(0)
-        get_name = lambda x: (output := self.experiment.get_output_by_id(x)) and output.name or x
-        correlation_matrix.columns = pd.Index([get_name(col) for col in correlation_matrix.columns])
-        correlation_matrix.index = pd.Index([get_name(idx) for idx in correlation_matrix.index])
+        correlation_matrix.columns = pd.Index([self._get_output_name(col) for col in correlation_matrix.columns])
+        correlation_matrix.index = pd.Index([self._get_output_name(idx) for idx in correlation_matrix.index])
 
         y_ticks = correlation_matrix.index
         x_ticks = correlation_matrix.columns
@@ -313,11 +312,10 @@ class CorrelationAnalysis(BaseModule):
             }
         ]
 
-        get_name = lambda x: (output := self.experiment.get_output_by_id(x)) and output.name or x
         fig_size = kwargs.get("fig_size", (10, 6))
         fig_dpi = kwargs.get("fig_dpi", 100)
         self._plot(plots, plot_size=fig_size, dpi=fig_dpi,
-                   fig_title=f"Lag Analysis: {get_name(lag_results.series1)} vs {get_name(lag_results.series2)}",
+                   fig_title=f"Lag Analysis: {self._get_output_name(lag_results.series1)} vs {self._get_output_name(lag_results.series2)}",
                    fig_xlabel="Lag", fig_ylabel="Correlation")
 
     def plot_time_series(self, series: List[str],
@@ -326,7 +324,7 @@ class CorrelationAnalysis(BaseModule):
                          **kwargs) -> None:
         """Plot two time series together for visual comparison.
 
-        :param series: List of series names to plot
+        :param series: List of series names (or IDs) to plot
         :type series: List[str]
         :param start_time: Start time of the period to plot
         :type start_time: Optional[pd.Timestamp]
@@ -343,20 +341,20 @@ class CorrelationAnalysis(BaseModule):
 
         plots = []
         for idx, name in enumerate(series):
-            output = self.experiment.get_output_by_name(name)
-            if output is None:
+            series_id = self._get_loaded_output_id(name)
+            if series_id is None:
                 self.logger.warning(f"Series {name} not found in dataframes.")
                 continue
 
-            df = self.dataframes[output.id].copy()
+            df = self.dataframes[series_id].copy()
             if start_time and end_time:
                 df = df[(df.index >= start_time) & (df.index <= end_time)]
 
             plots.append({
                 "plot_type": "time_series",
                 "data": df,
-                "y": output.id,
-                "label": output.name,
+                "y": series_id,
+                "label": self._get_output_name(series_id),
                 "color": colors(idx % 10),
                 "alpha": 0.85,
                 "linewidth": 2

@@ -212,10 +212,11 @@ def detect_anomalies(args):
         if total > 0:
             print("\nTop 3 Anomalies:")
             all_anomalies = []
-            for name, df in result.anomalies.items():
+            for output_id, df in result.anomalies.items():
                 is_anomaly = df.filter(regex="_is_anomaly$").any(axis=1)
                 anomaly_df = df[is_anomaly].copy()
-                anomaly_df["source"] = name
+                output = experiment.get_output_by_id(output_id)
+                anomaly_df["source"] = output.name if output else output_id
                 all_anomalies.append(anomaly_df)
 
             if all_anomalies:

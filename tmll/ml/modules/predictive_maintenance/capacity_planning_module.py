@@ -401,11 +401,7 @@ class CapacityPlanning(BaseModule):
         for resource_type in resource_types:
             columns = [
                 col for col in self.combined_df.columns
-                if (
-                    (resource_type == ResourceType.CPU and "cpu" in col.lower()) or
-                    (resource_type == ResourceType.MEMORY and "memory" in col.lower()) or
-                    (resource_type == ResourceType.DISK and "disk" in col.lower())
-                ) and not col.endswith("_original")
+                if not col.endswith("_original") and resource_type.name.lower() in self._get_output_name(col).lower()
             ]
             if columns:
                 all_resource_columns.extend(columns)
@@ -529,8 +525,7 @@ class CapacityPlanning(BaseModule):
                     )
                     resource_metrics["Total Violations"] = str(len(metrics.threshold_violations))
 
-                output = self.experiment.get_output_by_id(resource_id)
-                resource_name = output.name if output else resource_id
+                resource_name = self._get_output_name(resource_id)
                 DocumentGenerator.metrics_group(f"Resource: {resource_name}", resource_metrics)
 
                 if metrics.threshold_violations:
@@ -576,8 +571,7 @@ class CapacityPlanning(BaseModule):
                 pattern = metrics.utilization_pattern
                 violations = metrics.threshold_violations
 
-                output = self.experiment.get_output_by_id(resource_id)
-                resource_name = output.name if output else resource_id
+                resource_name = self._get_output_name(resource_id)
 
                 threshold = (
                     result.thresholds_used.cpu_threshold if resource_type.name == ResourceType.CPU.name
@@ -772,8 +766,7 @@ class CapacityPlanning(BaseModule):
                 usage_str = self._get_formatted_resource_property(metrics.average_usage, resource_type)
                 peak_str = self._get_formatted_resource_property(metrics.peak_usage, resource_type)
 
-                output = self.experiment.get_output_by_id(resource_id)
-                resource_name = output.name if output else resource_id
+                resource_name = self._get_output_name(resource_id)
                 title = (
                     f"{resource_type.name} Capacity Forecast: {resource_name}\n"
                     f"(Average Usage: {usage_str}, "

@@ -121,6 +121,34 @@ class BaseModule(ABC):
         plt.tight_layout()
         plt.show()
 
+    def _get_output_name(self, output_id: str) -> str:
+        """
+        Get the display name of the output with the given ID (dataframes are keyed by output ID).
+
+        :param output_id: The ID of the output
+        :type output_id: str
+        :return: The output's name, or the ID itself if the output is unknown
+        :rtype: str
+        """
+        output = self.experiment.get_output_by_id(output_id)
+        return output.name if output else output_id
+
+    def _get_loaded_output_id(self, output_name: str, partial_match: bool = False) -> Optional[str]:
+        """
+        Resolve an output name (or ID) to the ID of a matching output whose data is loaded in this module.
+
+        :param output_name: The name (or ID) of the output
+        :type output_name: str
+        :param partial_match: Whether to allow partial name matches
+        :type partial_match: bool, optional
+        :return: The ID of the loaded output, or None if no matching output was loaded
+        :rtype: Optional[str]
+        """
+        if output_name in self.dataframes:
+            return output_name
+        outputs = self.experiment.get_outputs_by_name(output_name, partial_match)
+        return next((o.id for o in outputs if o.id in self.dataframes), None)
+
     def _process(self, outputs: Optional[List[Output]] = None, **kwargs) -> None:
         """
         Base processing method that handles common data fetching and preprocessing tasks.
@@ -145,8 +173,10 @@ class BaseModule(ABC):
 
         # Process each output
         for output_key, output_data in data.items():
-            output = next(iter(output for output in outputs if output.id == output_key.split("$")[0]), None) if outputs else None
+            output_id = output_key.split("$")[0]
+            output = next((o for o in outputs if o.id == output_id), None) if outputs else None
             if output is None:
+                self.logger.warning(f"Skipping data of unknown output {output_id}")
                 continue
 
             if output.id not in self.dataframes:

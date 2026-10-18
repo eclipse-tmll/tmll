@@ -1,3 +1,5 @@
+import re
+from collections import Counter
 from typing import List, Optional, Union
 
 from tmll.common.models.trace import Trace
@@ -33,17 +35,26 @@ class Experiment(Trace):
         return cls(tsp_experiment.name, tsp_experiment.UUID, tsp_experiment.start, tsp_experiment.end, tsp_experiment.number_of_events, tsp_experiment.indexing_status.name, traces)
 
     def assign_outputs(self, outputs: List[Output]) -> None:
+        """
+        Assign the outputs to the experiment. Outputs sharing the same name (e.g., one "Memory Usage" per trace)
+        are renamed to "Name (1)", "Name (2)", ... so that their names stay distinguishable. Suffixes already
+        taken by another output's name are skipped, so the resulting names are unique.
+
+        :param outputs: The outputs of the experiment
+        :type outputs: List[Output]
+        """
         self.outputs = outputs
 
-        # If there is multiple outputs with the same name, use number to differentiate them
-        name_counts = {}
-        for output in self.outputs:
+        name_counts = Counter(output.name for output in outputs)
+        used_names = set(name_counts)
+        for output in outputs:
             name = output.name
-            count = name_counts.get(name, 0) + 1
-            name_counts[name] = count
-            
-            if count > 1 or name in [o.name for o in self.outputs if o != output]:
-                output.name = f"{name} ({count})"
+            if name_counts[name] > 1:
+                suffix = 1
+                while f"{name} ({suffix})" in used_names:
+                    suffix += 1
+                output.name = f"{name} ({suffix})"
+                used_names.add(output.name)
 
     def __repr__(self) -> str:
         return f"Experiment(name={self.name}, uuid={self.uuid}, start={self.start}, end={self.end}, num_events={self.num_events}, indexing={self.indexing}, traces={self.traces}, outputs={self.outputs})"
@@ -119,9 +130,13 @@ class Experiment(Trace):
         """
         return next((o for o in self.outputs if o.id == output_id), None)
 
+    # Kept for backward compatibility
+    get_output = get_output_by_id
+
     def get_output_by_name(self, output_name: str, partial_match: bool = False) -> Optional[Output]:
         """
-        Get the output with the given name (case insensitive).
+        Get the output with the given name (case insensitive). An exact match is preferred over
+        the "Name (n)" variants created by `assign_outputs` for duplicate names.
 
         :param output_name: The name of the output to get
         :type output_name: str
@@ -130,25 +145,24 @@ class Experiment(Trace):
         :return: The output with the given name, or None if not found
         :rtype: Optional[Output]
         """
-        if partial_match:
-            return next((o for o in self.outputs if output_name.lower() in o.name.lower()), None)
-
-        name = output_name.lower()
-        exact = next((o for o in self.outputs if o.name.lower() == name), None)
-        return exact or next((o for o in self.outputs if o.name.lower().startswith(f"{name} (")), None)
+        outputs = self.get_outputs_by_name(output_name, partial_match)
+        return next((o for o in outputs if o.name.lower() == output_name.lower()), outputs[0] if outputs else None)
 
     def get_outputs_by_name(self, output_name: str, partial_match: bool = False) -> List[Output]:
         """
-        Get all outputs with the given name (case insensitive).
+        Get all outputs with the given name (case insensitive), including the "Name (n)" variants
+        created by `assign_outputs` for duplicate names.
 
-        :param output_name: The name of the output to get
+        :param output_name: The name of the outputs to get
         :type output_name: str
         :param partial_match: Whether to allow partial matches
         :type partial_match: bool, optional
         :return: The list of outputs with the given name
         :rtype: List[Output]
         """
+        name = output_name.lower()
         if partial_match:
-            return [o for o in self.outputs if output_name.lower() in o.name.lower()]
+            return [o for o in self.outputs if name in o.name.lower()]
 
-        return [o for o in self.outputs if o.name.lower() == output_name.lower()]
+        duplicate_name = re.compile(rf"{re.escape(name)} \(\d+\)")
+        return [o for o in self.outputs if o.name.lower() == name or duplicate_name.fullmatch(o.name.lower())]

@@ -64,7 +64,7 @@ class DataFetcher:
                         if dataframes.get(f"{output.id}${key}", None) is None:
                             dataframes[f"{output.id}${key}"] = dataframe
                         else:
-                            dataframes[f"{output.id}${key}"] = pd.merge(dataframes[f"{output.id}_{key}"], dataframe, on='timestamp', how='outer')
+                            dataframes[f"{output.id}${key}"] = pd.merge(dataframes[f"{output.id}${key}"], dataframe, on='timestamp', how='outer')
             elif isinstance(data[output.id], pd.DataFrame):
                 dataframes[output.id] = data[output.id]
 

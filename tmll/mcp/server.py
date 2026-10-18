@@ -326,10 +326,9 @@ def plot_xy_with_anomalies(
 
         series = {}
         total = 0
-        for name, df in ad.dataframes.items():
-            anomaly_df = result.anomalies.get(name)
-            periods = [[str(s), str(e)]
-                       for s, e in result.anomaly_periods.get(name, [])]
+        for output_id, df in ad.dataframes.items():
+            anomaly_df = result.anomalies.get(output_id)
+            periods = [[str(s), str(e)] for s, e in result.anomaly_periods.get(output_id, [])]
             ax, ay = [], []
             if anomaly_df is not None and not anomaly_df.empty:
                 mask_cols = anomaly_df.filter(regex="_is_anomaly$")
@@ -340,7 +339,8 @@ def plot_xy_with_anomalies(
                         ax.append(str(ts))
                         ay.append(float(df.loc[ts].iloc[0]))
                 total += int(mask.sum())
-            series[name] = {
+            output = experiment.get_output_by_id(output_id)
+            series[output.name if output else output_id] = {
                 "x": [str(i) for i in df.index],
                 "y": [float(v) for v in df.iloc[:, 0].tolist()],
                 "anomaly_x": ax,

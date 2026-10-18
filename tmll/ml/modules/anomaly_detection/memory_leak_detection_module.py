@@ -85,8 +85,8 @@ class MemoryLeakDetection(BaseModule):
 
         self.logger.info("Initializing Memory Leak Detection module.")
 
-        self.required_outputs = experiment.find_outputs(keyword=["memory usage"], type=["xy"], match_any=True)
-        self.required_outputs.extend(experiment.find_outputs(keyword=["events table"], type=["table"], match_any=True))
+        self.required_outputs = experiment.find_outputs(keyword=["memory usage"], type=["xy"])
+        self.required_outputs.extend(experiment.find_outputs(keyword=["events table"], type=["table"]))
         self._process(self.required_outputs, **kwargs)
 
     def _process(self, outputs: Optional[List[Output]] = None, **kwargs) -> None:
@@ -98,17 +98,17 @@ class MemoryLeakDetection(BaseModule):
                          **kwargs)
 
     def _post_process(self, **kwargs) -> None:
-        events_output = self.experiment.get_output_by_name("Events Table")
-        if events_output is None or events_output.id not in self.dataframes:
+        events_id = self._get_loaded_output_id("Events Table")
+        if events_id is None:
             return
 
-        df = self.dataframes[events_output.id]
-        if not all(col in df.columns for col in ["size", "ptr"]):
+        df = self.dataframes[events_id]
+        if not all(col in df.columns for col in ["Event type", "size", "ptr"]):
             self.logger.warning("Events table does not contain necessary columns for memory leak analysis")
-            self.dataframes[events_output.id] = pd.DataFrame()
+            self.dataframes[events_id] = pd.DataFrame()
             return
 
-        self.dataframes[events_output.id] = self._separate_events(df)
+        self.dataframes[events_id] = self._separate_events(df)
 
     def _separate_events(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """
@@ -134,28 +134,28 @@ class MemoryLeakDetection(BaseModule):
 
     def _get_memory_usage_dataframe(self) -> Optional[pd.DataFrame]:
         """
-        Get the memory usage dataframe from the experiment.
+        Get the loaded memory usage dataframe, preferring the UST (userspace) one as it matches the
+        traced malloc/free events, and falling back to any other loaded memory usage output.
 
-        :return: The memory usage dataframe
+        :return: The memory usage dataframe, or None if not loaded
         :rtype: Optional[pd.DataFrame]
         """
-        mu_outputs = self.experiment.get_outputs_by_name("Memory Usage", True)
-        ust_mu_output = next((o for o in mu_outputs if "ust" in o.id.lower()), None)
-        if ust_mu_output is not None:
-            return self.dataframes.get(ust_mu_output.id, None)
-        return None
+        mu_outputs = [o for o in self.experiment.get_outputs_by_name("Memory Usage", partial_match=True) if o.id in self.dataframes]
+        if not mu_outputs:
+            return None
+
+        ust_output = next((o for o in mu_outputs if "ust" in f"{o.id} {o.description}".lower()), mu_outputs[0])
+        return self.dataframes[ust_output.id]
 
     def _get_events_dataframe(self) -> Optional[pd.DataFrame]:
         """
-        Get the events table dataframe from the experiment.
+        Get the loaded events table dataframe.
 
-        :return: The events dataframe
+        :return: The events dataframe, or None if not loaded
         :rtype: Optional[pd.DataFrame]
         """
-        et_output = self.experiment.get_output_by_name("Events Table")
-        if et_output is not None:
-            return self.dataframes.get(et_output.id, None)
-        return None
+        events_id = self._get_loaded_output_id("Events Table")
+        return self.dataframes[events_id] if events_id is not None else None
 
     def analyze_memory_leaks(self, window_size: str = MemoryThresholds.window_size,
                              fragmentation_threshold: float = MemoryThresholds.fragmentation,
@@ -602,13 +602,14 @@ class MemoryLeakDetection(BaseModule):
             points_per_window = max(len(memory_df) // 10, 1)
 
             # Scale the trend line as it was trained on normalized data, so we need to scale it back
-            analysis_result.metrics.regression_intercept = analysis_result.metrics.regression_intercept * memory_df.iloc[:, 0].max()
-            analysis_result.metrics.regression_slope = analysis_result.metrics.regression_slope * memory_df.iloc[:, 0].max()
+            # (without mutating the results, so plotting repeatedly does not rescale them again)
+            regression_intercept = analysis_result.metrics.regression_intercept * memory_df.iloc[:, 0].max()
+            regression_slope = analysis_result.metrics.regression_slope * memory_df.iloc[:, 0].max()
             trend_line = pd.DataFrame({
                 "timestamp": memory_df.index,
-                "trend_line": analysis_result.metrics.regression_slope *
+                "trend_line": regression_slope *
                 (memory_df.index - memory_df.index[0]).total_seconds() +
-                analysis_result.metrics.regression_intercept
+                regression_intercept
             })
 
             # Plot 1: Memory Usage Over Time

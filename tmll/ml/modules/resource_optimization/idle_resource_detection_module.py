@@ -101,15 +101,12 @@ class IdleResourceDetection(BaseModule):
                          **kwargs)
 
     def _post_process(self, **kwargs) -> None:
-        resources_output = self.experiment.get_output_by_name("Resources Status")
-        if resources_output is None:
-            self.logger.warning("No Resources Status output found")
-            return
-
-        resources_df = self.dataframes.get(resources_output.id, pd.DataFrame())
-        if resources_df.empty:
+        resources_id = self._get_loaded_output_id("Resources Status")
+        if resources_id is None or self.dataframes[resources_id].empty:
             self.logger.warning("No CPU resources found in data")
             return
+
+        resources_df = self.dataframes[resources_id]
 
         # Create a duration column based on end_time - timestamp (index)
         resources_df["duration"] = resources_df.index.to_series().diff().dt.total_seconds().fillna(0).cumsum()
@@ -161,7 +158,20 @@ class IdleResourceDetection(BaseModule):
         # Set multi-index with timestamp and cpu_id
         resources_df = resources_df.set_index(["timestamp", "cpu_id"])
 
-        self.dataframes[resources_output.id] = resources_df
+        self.dataframes[resources_id] = resources_df
+
+    def _is_resource_type(self, output_id: str, resource_type: ResourceType) -> bool:
+        """
+        Check whether the output with the given ID holds data of the given resource type, based on its name.
+
+        :param output_id: The ID of the output
+        :type output_id: str
+        :param resource_type: The resource type to check
+        :type resource_type: ResourceType
+        :return: Whether the output belongs to the resource type
+        :rtype: bool
+        """
+        return resource_type.name.lower() in self._get_output_name(output_id).lower()
 
     def _get_formatted_resource_property(self, resource_property: float, resource_type: ResourceType) -> str:
         """
@@ -250,14 +260,10 @@ class IdleResourceDetection(BaseModule):
         :return: Analysis results for each CPU core
         :rtype: Dict[int, SchedulingMetrics]
         """
-        resources_output = self.experiment.get_output_by_name("Resources Status")
-        if resources_output is None:
-            self.logger.warning("No Resources Status output found")
-            return {}
-
-        resources_df = self.dataframes.get(resources_output.id, pd.DataFrame()) 
+        resources_id = self._get_loaded_output_id("Resources Status")
+        resources_df = self.dataframes[resources_id] if resources_id is not None else pd.DataFrame()
         if resources_df.empty:
-            self.logger.warning("No Resources Status data found")
+            self.logger.warning("Empty \"Resources Status\" dataframe provided")
             return {}
 
         cpu_ids = resources_df.index.get_level_values("cpu_id").unique()
@@ -339,12 +345,8 @@ class IdleResourceDetection(BaseModule):
 
         for resource_type in resource_types:
             resource_dfs = {
-                name: df for name, df in self.dataframes.items()
-                if (
-                    (resource_type == ResourceType.CPU and "cpu" in name.lower()) or
-                    (resource_type == ResourceType.MEMORY and "memory" in name.lower()) or
-                    (resource_type == ResourceType.DISK and "disk" in name.lower())
-                )
+                output_id: df for output_id, df in self.dataframes.items()
+                if self._is_resource_type(output_id, resource_type)
             }
 
             if not resource_dfs:
@@ -354,13 +356,13 @@ class IdleResourceDetection(BaseModule):
             # Filter by time period if specified
             if start_time is not None and end_time is not None:
                 resource_dfs = {
-                    name: df[(df.index >= start_time) & (df.index <= end_time)]
-                    for name, df in resource_dfs.items()
+                    output_id: df[(df.index >= start_time) & (df.index <= end_time)]
+                    for output_id, df in resource_dfs.items()
                 }
 
             idle_resources = {}
 
-            for name, df in resource_dfs.items():
+            for output_id, df in resource_dfs.items():
                 if df.empty:
                     continue
 
@@ -375,7 +377,7 @@ class IdleResourceDetection(BaseModule):
                 total_time = (series.index[-1] - series.index[0]).total_seconds()  # type: ignore
                 idle_percentage = (total_idle_time / total_time * 100) if total_time > 0 else 0
 
-                idle_resources[name] = ResourceMetrics(
+                idle_resources[output_id] = ResourceMetrics(
                     average_usage=avg_usage,
                     peak_usage=peak_usage,
                     idle_percentage=idle_percentage,
@@ -417,7 +419,7 @@ class IdleResourceDetection(BaseModule):
         # Overall Resource Utilization - Show for all resource types
         overall_metrics = {}
         for resource_type in ResourceType:
-            if not any(resource_type.name.lower() in id.lower() for id in self.dataframes):
+            if not any(self._is_resource_type(output_id, resource_type) for output_id in self.dataframes):
                 overall_metrics[f"{resource_type.name} Average Usage"] = "N/A (No data available)"
                 overall_metrics[f"{resource_type.name} Monitoring Duration"] = "N/A (No data available)"
                 continue
@@ -433,7 +435,7 @@ class IdleResourceDetection(BaseModule):
                     usage_str = f"{self._get_formatted_resource_property(sum(m.average_usage for m in result.idle_resources.values()), resource_type)} (Idle periods detected)"
             else:
                 # Calculate metrics for resources without idle periods
-                df = next((df for id, df in self.dataframes.items() if resource_type.name.lower() in id.lower()), None)
+                df = next((df for output_id, df in self.dataframes.items() if self._is_resource_type(output_id, resource_type)), None)
                 if df is not None:
                     usage_str = self._get_formatted_resource_property(df.mean().mean(), resource_type)
                     total_duration = (df.index[-1] - df.index[0]).total_seconds()
@@ -481,8 +483,7 @@ class IdleResourceDetection(BaseModule):
                             longest_idle = max((end - start).total_seconds() for start, end in metrics.idle_periods)
                             resource_metrics["Longest Idle Period"] = f"{longest_idle:.2f}s"
 
-                        output = self.experiment.get_output_by_id(resource_id)
-                        resource_name = output.name if output else resource_id
+                        resource_name = self._get_output_name(resource_id)
                         DocumentGenerator.metrics_group(f"Resource: {resource_name}", resource_metrics)
 
                         if metrics.idle_periods:
@@ -568,8 +569,7 @@ class IdleResourceDetection(BaseModule):
                 high_usage_cpus = []
 
                 for resource_id, metrics in cpu_result.idle_resources.items():
-                    output = self.experiment.get_output_by_id(resource_id)
-                    resource_name = output.name if output else resource_id
+                    resource_name = self._get_output_name(resource_id)
                     idle_cpus.append(f"{resource_name} ({metrics.idle_percentage:.1f}% idle)")
 
                     if metrics.usage_pattern == "Highly variable":
@@ -601,8 +601,7 @@ class IdleResourceDetection(BaseModule):
                 inefficient_memory = []
 
                 for resource_id, metrics in memory_result.idle_resources.items():
-                    output = self.experiment.get_output_by_id(resource_id)
-                    resource_name = output.name if output else resource_id
+                    resource_name = self._get_output_name(resource_id)
                     val, unit = Formatter.format_bytes(metrics.average_usage)
                     peak_val, peak_unit = Formatter.format_bytes(metrics.peak_usage)
 
@@ -703,8 +702,7 @@ class IdleResourceDetection(BaseModule):
 
             for resource_id, metrics in result.idle_resources.items():
                 df = self.dataframes[resource_id]
-                output = self.experiment.get_output_by_id(resource_id)
-                resource_name = output.name if output else resource_id
+                resource_name = self._get_output_name(resource_id)
 
                 plots = []
                 # Resource usage plot
@@ -779,14 +777,10 @@ class IdleResourceDetection(BaseModule):
             self.logger.warning("No CPU scheduling results to plot")
             return
 
-        resources_output = self.experiment.get_output_by_name("Resources Status")
-        if resources_output is None:
-            self.logger.warning("No Resources Status output found")
-            return
-
-        resources_df = self.dataframes.get(resources_output.id, pd.DataFrame())
+        resources_id = self._get_loaded_output_id("Resources Status")
+        resources_df = self.dataframes[resources_id] if resources_id is not None else pd.DataFrame()
         if resources_df.empty:
-            self.logger.warning("No Resources Status data found")
+            self.logger.warning("No time graph data available for plotting")
             return
 
         fig_size = kwargs.get("fig_size", (15, 4))
